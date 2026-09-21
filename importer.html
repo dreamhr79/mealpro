@@ -1,0 +1,47 @@
+<!doctype html><html lang="hr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Uvoz Instagram recepta</title>
+<style>
+body{font:15px system-ui;margin:0;background:#f5f7fa;color:#182433}.wrap{max-width:1050px;margin:28px auto;padding:0 18px}
+.card{background:white;border:1px solid #dce3ea;border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 2px 10px #00000008}
+h1,h2{margin:0 0 12px}label{font-weight:700;display:block;margin-bottom:6px}
+.row{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.grow{flex:1;min-width:300px}
+input,select,textarea{box-sizing:border-box;width:100%;padding:11px;border:1px solid #b9c7d6;border-radius:10px;font:inherit}
+button{padding:11px 16px;border:0;border-radius:10px;background:#173b5e;color:white;font-weight:800;cursor:pointer}
+button.secondary{background:#e8eef4;color:#173b5e}.muted{color:#64748b}.ok{color:#08783e}.warn{color:#a15c00}
+.ing{display:grid;grid-template-columns:120px 1fr 1.2fr 105px 44px;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #edf1f5}
+.delIng{padding:8px 10px;background:#f3e7e7;color:#8a1f1f;font-size:18px}.badge{font-size:12px;padding:3px 7px;border-radius:999px;background:#edf2f7}.hidden{display:none}
+#caption{min-height:180px}#status{margin-top:10px;font-weight:700}
+@media(max-width:750px){.ing{grid-template-columns:1fr}.grow{min-width:100%}}
+
+.dbsearch{position:relative}
+.dbsearch input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #bfd0e2;border-radius:10px;background:white;font:inherit}
+.dbresults{display:none;position:absolute;z-index:50;left:0;right:0;top:calc(100% + 4px);max-height:280px;overflow:auto;background:white;border:1px solid #bfd0e2;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.14)}
+.dbresults.open{display:block}
+.dbopt{padding:9px 11px;border-bottom:1px solid #edf1f5;cursor:pointer;font-size:13px}
+.dbopt:hover{background:#f1f6fb}
+.dbopt:last-child{border-bottom:0}
+.dbopt .sub{font-size:11px;color:#6a7888;margin-top:2px}
+
+.ingedit{display:grid;grid-template-columns:minmax(64px,.7fr) minmax(62px,.55fr);gap:6px}
+.ingedit input,.nameedit{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #bfd0e2;border-radius:9px;background:#fff;font:inherit}
+.nameedit{font-weight:700}
+</style></head><body><div class="wrap">
+<div class="card"><h1>📥 Uvoz recepta s Instagrama</h1>
+<p class="muted">Zalijepi link na Reel ili objavu. Ekstenzija će otvoriti Instagram u pozadini, pročitati caption i parsirati recept.</p>
+<div class="row"><div class="grow"><label>Instagram link</label><input id="url" placeholder="https://www.instagram.com/reel/..."></div><button id="fetch">Dohvati i parsiraj</button></div>
+<div id="status"></div></div>
+<div id="preview" class="hidden">
+<div class="card"><h2>Caption</h2><textarea id="caption"></textarea><div style="margin-top:10px"><button id="reparse" class="secondary">Ponovno parsiraj tekst</button></div></div>
+<div class="card"><div class="row"><div class="grow"><label>Naziv recepta</label><input id="title"></div><div style="width:150px"><label>Porcije</label><input id="servings" type="number" min="1" value="1"></div></div></div>
+<div class="card" id="macroCard"><h2>Makrosi iz recepta</h2>
+<div class="row"><div class="grow"><label>Makrosi su</label><select id="macroType"><option value="nepoznato">Nije navedeno</option><option value="porcija">Po porciji</option><option value="ukupno">Za cijeli recept</option></select></div>
+<div class="grow"><label>Kalorije (kcal)</label><input id="macroKcal" type="number" min="0" step="any"></div>
+<div class="grow"><label>Proteini (g)</label><input id="macroProtein" type="number" min="0" step="any"></div>
+<div class="grow"><label>UH (g)</label><input id="macroCarbs" type="number" min="0" step="any"></div>
+<div class="grow"><label>Masti (g)</label><input id="macroFat" type="number" min="0" step="any"></div>
+<div class="grow"><label>Vlakna (g)</label><input id="macroFiber" type="number" min="0" step="any"></div></div>
+<p class="muted" id="macroStatus">Ako caption sadrži makrose, parser ih automatski popunjava. Vrijednosti možeš ručno ispraviti.</p></div>
+<div class="card"><h2>Sastojci</h2><div id="ingredients"></div><p class="muted">Količinu, jedinicu i naziv možeš ručno urediti prije spremanja. Tražilica pretražuje cijelu osobnu + HR bazu, a višak obriši s ×.</p></div>
+<div class="card"><label>Upute</label><textarea id="instructions"></textarea><div class="row" style="margin-top:12px"><button id="save">💾 Spremi u Moje recepte</button><button id="openApp" class="secondary">Otvori kalkulator</button></div><div id="saveStatus"></div></div>
+</div></div><script src="importer.js"></script></body></html>

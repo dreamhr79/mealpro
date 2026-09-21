@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="hr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CijeneMeal Pro V2.9.2.2</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+ <div>
+  <h1>🍽️ CijeneMeal Pro <span style="font-size:12px;opacity:.65">v2.9.2.2</span></h1>
+  <div class="sub">Kalkulator obroka, Dnevni plan, pametna kupovina i cjenici s cijene.dev</div>
+ </div>
+ <div style="display:flex;align-items:center;gap:10px">
+  <div id="syncState" class="syncState pill">Baza nije sinkronizirana</div>
+  <button id="quickSyncBtn" class="secondary" style="padding:7px 12px;font-size:12px">🔄 Osvježi cjenike</button>
+ </div>
+</header>
+
+<nav id="tabs">
+ <button data-tab="creator" class="active">🍽️ Kreator obroka</button>
+ <button data-tab="dayplan">🧩 Dnevni plan</button>
+ <button data-tab="shoplist">🛒 Popis za kupovinu</button>
+ <button data-tab="favorites">⭐ Favoriti <span id="favCount"></span></button>
+ <button data-tab="catalog">🇭🇷 Baza cjenika</button>
+ <button data-tab="custom">👤 Moji proizvodi</button>
+ <button data-tab="recipes">📖 Recepti <span id="recipeCount"></span></button>
+ <button data-tab="importerTab">📥 Instagram uvoz</button>
+ <button data-tab="backupTab">💾 Backup</button>
+</nav>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<main>
+ <!-- 1. KREATOR OBROKA -->
+ <section id="creator" class="view active">
+  <div class="viewHead">
+   <div>
+    <h2>Kreator obroka</h2>
+    <p>Sastavi obrok iz Favorita ili Mojih proizvoda. Cijene i makronutrijenti računaju se u realnom vremenu.</p>
+   </div>
+   <button id="newMeal" class="secondary">Novi obrok</button>
+  </div>
+  
+  <div class="card">
+   <div id="editingRecipeBanner" style="display:none;background:#eaf2f9;color:#17365d;padding:9px 14px;border-radius:10px;font-size:13px;margin-bottom:14px;border:1px solid #cbd5e1;justify-content:space-between;align-items:center">
+    <span>📝 Uređuješ recept: <b id="editingRecipeName"></b></span>
+    <button type="button" id="cancelEditingRecipe" class="secondary" style="padding:4px 9px;font-size:12px">Otkaži uređivanje</button>
+   </div>
+   <div class="grid2">
+    <label>Naziv recepta / obroka
+     <input id="mealName" placeholder="npr. Proteinski tiramisu / Piletina s rižom">
+    </label>
+    <label>Broj porcija
+     <input id="mealServings" type="number" min="1" step="1" value="1">
+    </label>
+   </div>
+   
+   <div class="pickerTabs">
+    <button data-source="favorites" class="active">⭐ Favoriti</button>
+    <button data-source="custom">👤 Moji proizvodi</button>
+    <button data-source="catalog">🔎 Baza cijene.dev</button>
+   </div>
+   
+   <div id="pickerFavorites" class="picker"></div>
+   <div id="pickerCustom" class="picker" style="display:none"></div>
+   <div id="pickerCatalog" class="picker" style="display:none">
+    <div class="searchRow">
+     <input id="creatorCatalogSearch" placeholder="Pretraži bazu cjenika (npr. posni sir, zobene, piletina)…">
+     <button id="creatorCatalogBtn">Traži bazu</button>
+    </div>
+    <div id="creatorCatalogResults" style="margin-top:10px"></div>
+   </div>
+  </div>
+
+  <div class="card">
+   <h3 style="margin-top:0">Sastojci u obroku</h3>
+   <div id="mealIngredients"></div>
+   <div id="mealTotals" class="totals"></div>
+   <div class="actions" style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
+    <button id="saveRecipe">💾 Spremi u Recepte</button>
+    <button id="saveRecipeCopy" class="secondary" style="display:none">➕ Spremi kao novu kopiju</button>
+    <button id="addMealToDayPlan" class="secondary">＋ Pošalji u Dnevni plan</button>
+   </div>
+  </div>
+ </section>
+
+ <!-- 2. DNEVNI PLAN -->
+ <section id="dayplan" class="view">
+  <div class="viewHead">
+   <div>
+    <h2>🧩 Dnevni plan i makronutrijenti</h2>
+    <p>Organiziraj dnevne obroke. Zaključaj kalorije i automatski balansiraj proteine, ugljikohidrate i masti.</p>
+   </div>
+   <button id="clearDayPlan" class="danger">Očisti dan</button>
+  </div>
+  
+  <div class="card">
+   <div class="grid4">
+    <div>
+     <label>Cilj kcal</label>
+     <div style="display:grid;grid-template-columns:1fr auto;gap:6px">
+      <input id="goalKcal" type="number" min="0" step="10" value="2200">
+      <button id="lockKcal" type="button" class="secondary" style="padding:9px 10px">🔒 Zaključano</button>
+     </div>
+    </div>
+    <div><label>Proteini (g)</label><input id="goalProtein" type="number" min="0" step="5" value="160"></div>
+    <div><label>Ugljikohidrati (g)</label><input id="goalCarbs" type="number" min="0" step="5" value="220"></div>
+    <div><label>Masti (g)</label><input id="goalFat" type="number" min="0" step="5" value="70"></div>
+   </div>
+   
+   <div id="daySummary" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px"></div>
+   
+   <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:var(--muted)">
+    <span id="macroModeHint">Kalorije su zaključane.</span>
+    <label style="display:flex;align-items:center;gap:6px">Prilagodi:
+     <select id="macroBalance" style="width:auto;margin:0;padding:4px 8px">
+      <option value="carbs">Ugljikohidrate (UH)</option>
+      <option value="fat">Masti</option>
+      <option value="protein">Proteine</option>
+     </select>
+    </label>
+   </div>
+  </div>
+
+  <div class="card">
+   <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+    <div style="flex:1;min-width:240px">
+     <label>Novi blok dana</label>
+     <input id="dayBlockName" placeholder="npr. Doručak, Ručak, Međuobrok, Večera">
+    </div>
+    <button id="addEmptyDayBlock">＋ Dodaj blok</button>
+   </div>
+  </div>
+
+  <div id="dayBlocks"></div>
+
+  <div class="card totals" style="grid-template-columns:repeat(5,1fr)">
+   <div><span>DNEVNI UKUPNO</span><b id="dayTotalKcal">0 kcal</b></div>
+   <div><span>PROTEINI</span><b id="dayTotalP">0 g</b></div>
+   <div><span>UH</span><b id="dayTotalC">0 g</b></div>
+   <div><span>MASTI</span><b id="dayTotalF">0 g</b></div>
+   <div><span>UKUPNA CIJENA</span><b id="dayTotalPrice">0,00 €</b></div>
+  </div>
+ </section>
+
+ <!-- 3. POPIS ZA KUPOVINU -->
+ <section id="shoplist" class="view">
+  <div class="viewHead">
+   <div>
+    <h2>🛒 Pametni popis za kupovinu</h2>
+    <p>Automatski objedinjuje namirnice iz <b>Dnevnog plana</b>, grupira ih po trgovinama i računa potrebna pakiranja.</p>
+   </div>
+   <div style="display:flex;gap:8px">
+    <button id="refreshShopList">🔄 Osvježi</button>
+    <button id="copyShopList" class="secondary">📋 Kopiraj za WhatsApp / Mobitel</button>
+   </div>
+  </div>
+  <div id="shopListContainer"></div>
+ </section>
+
+ <!-- 4. FAVORITI -->
+ <section id="favorites" class="view">
+  <div class="viewHead">
+   <div>
+    <h2>⭐ Moji favoriti</h2>
+    <p>Tvoj osobni radni katalog namirnica s automatskim praćenjem akcija i cijena po 100 g/ml.</p>
+   </div>
+  </div>
+  <div style="display:grid;grid-template-columns:minmax(240px,1fr) 200px;gap:12px;margin-bottom:14px">
+   <input id="favoritesSearch" type="search" placeholder="Pretraži favorite po nazivu, marki, trgovini…">
+   <select id="favoritesSort">
+    <option value="valueAsc" selected>⭐ Najisplativije (€ / 100 g prvo)</option>
+    <option value="recent">Nedavno dodano</option>
+    <option value="name">Naziv A–Ž</option>
+    <option value="priceAsc">Cijena pakiranja (najniža)</option>
+    <option value="priceDesc">Cijena pakiranja (najviša)</option>
+   </select>
+  </div>
+  <div id="favoritesList" class="cards"></div>
+ </section>
+
+ <!-- 5. BAZA CIJENE.DEV -->
+ <section id="catalog" class="view">
+  <div class="viewHead">
+   <div>
+    <h2>🇭🇷 Baza cijene.dev</h2>
+    <p>Preko 50.000 artikala s cijenama i akcijama hrvatskih trgovačkih lanaca. Pretraživanje je trenutno zahvaljujući IndexedDB tokenima.</p>
+   </div>
+   <button id="syncBtn">🔄 Sinkroniziraj cjenike (ZIP)</button>
+  </div>
+  <div class="card">
+   <div class="searchRow">
+    <input id="catalogSearch" placeholder="Upiši naziv namirnice (npr. skyr, jaja, pileća prsa, zobene)…">
+    <button id="catalogSearchBtn">Traži bazu</button>
+   </div>
+   <div id="catalogInfo" class="hint" style="margin-top:8px"></div>
+   <div id="catalogResults" style="margin-top:12px"></div>
+  </div>
+ </section>
+
+ <!-- 6. MOJI PROIZVODI -->
+ <section id="custom" class="view">
+  <div class="viewHead">
+   <div>
+    <h2>👤 Moji proizvodi</h2>
+    <p>Namirnice s vlastitim unesenim cijenama i makrosima (whey protein, dodaci prehrani, namirnice s tržnice).</p>
+   </div>
+   <button id="addCustom">＋ Novi proizvod</button>
+  </div>
+  <div id="customList" class="cards"></div>
+ </section>
+
+ <!-- 7. RECEPTI -->
+ <section id="recipes" class="view">
+  <div class="viewHead">
+   <div>
+    <h2>📖 Spremljeni recepti</h2>
+    <p>Gotovi obroci s točnim normativima, cijenom po porciji i nutritivnom tablicom.</p>
+   </div>
+  </div>
+  <div id="recipesList" class="cards"></div>
+ </section>
+
+ <!-- 8. INSTAGRAM UVOZ -->
+ <section id="importerTab" class="view">
+  <div class="viewHead">
+   <div>
+    <h2>📥 Uvoz recepata s Instagrama</h2>
+    <p>Zalijepi link na Reel ili objavu. Ekstenzija izdvaja naziv videa, autorske makronutrijente, sastojke i postupak pripreme.</p>
+   </div>
+  </div>
+  <div class="card">
+   <div class="searchRow">
+    <input id="igUrl" placeholder="https://www.instagram.com/reel/...">
+    <button id="igFetchBtn">Dohvati i analiziraj</button>
+   </div>
+   <div id="igStatus" class="hint" style="margin-top:8px;font-weight:700"></div>
+  </div>
+
+  <div id="igPreview" style="display:none">
+   <!-- CAPTION -->
+   <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+     <label style="margin:0">Izvorni tekst objave (Caption)</label>
+     <button id="igCopyMethodBtn" class="secondary" style="padding:4px 10px;font-size:12px">📋 Kopiraj tekst u Pripremu</button>
+    </div>
+    <textarea id="igCaption" style="width:100%;min-height:120px;padding:10px;font:inherit;border:1px solid #cbd5e1;border-radius:10px"></textarea>
+    <div style="margin-top:8px">
+     <button id="igReparseBtn" class="secondary" style="font-size:13px">🔄 Ponovno parsiraj tekst</button>
+    </div>
+   </div>
+
+   <!-- OSNOVNI PODACI I AUTORSKI MAKROSI -->
+   <div class="card">
+    <div class="grid2">
+     <label>Naziv recepta (iz videa ili objave)<input id="igTitle" placeholder="Upiši ili uredi naziv recepta"></label>
+     <label>Broj porcija<input id="igServings" type="number" min="1" value="1"></label>
+    </div>
+
+    <!-- AUTORSKI MAKROSI -->
+    <div style="margin-top:16px;background:#f8fafc;padding:14px;border-radius:12px;border:1px solid #e2e8f0">
+     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b style="font-size:14px;color:var(--accent)">📊 Autorski makrosi (kako je autor naveo u videu/opisu):</b>
+      <span id="igMacroStatus" class="hint" style="font-size:11px;font-weight:700"></span>
+     </div>
+     <div style="display:grid;grid-template-columns:minmax(140px,1.2fr) repeat(4,1fr);gap:8px;align-items:end">
+      <div>
+       <label style="font-size:11px">Navedeno kao</label>
+       <select id="igMacroType" style="padding:7px">
+        <option value="porcija">Po porciji</option>
+        <option value="ukupno">Za cijeli recept</option>
+        <option value="nepoznato">Nije navedeno</option>
+       </select>
+      </div>
+      <div><label style="font-size:11px">kcal</label><input id="igMacroKcal" type="number" step="any" placeholder="0"></div>
+      <div><label style="font-size:11px">Proteini (g)</label><input id="igMacroProtein" type="number" step="any" placeholder="0"></div>
+      <div><label style="font-size:11px">UH (g)</label><input id="igMacroCarbs" type="number" step="any" placeholder="0"></div>
+      <div><label style="font-size:11px">Masti (g)</label><input id="igMacroFat" type="number" step="any" placeholder="0"></div>
+     </div>
+    </div>
+    
+    <!-- SASTOJCI -->
+    <div style="margin-top:16px">
+     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h3 style="margin:0;font-size:15px">Sastojci recepta (možeš mijenjati, brisati i dodavati):</h3>
+      <button id="igAddIngBtn" class="secondary" style="padding:6px 12px;font-size:12px">＋ Dodaj sastojak</button>
+     </div>
+     <div id="igIngredientsList"></div>
+    </div>
+
+    <!-- POSTUPAK / PRIPREMA -->
+    <div style="margin-top:16px">
+     <label style="font-size:13px;font-weight:700;margin-bottom:6px">📝 Postupak pripreme (upute)</label>
+     <textarea id="igInstructions" placeholder="Zalijepi ili uredi upute za pripremu (npr. '1. Pomiješaj jogurt i whey... 2. Posloži u čašu...')" style="width:100%;min-height:100px;padding:10px;font:inherit;border:1px solid #cbd5e1;border-radius:10px"></textarea>
+    </div>
+
+    <!-- SPREMANJE -->
+    <div class="actions" style="margin-top:18px;display:flex;gap:10px;justify-content:flex-start;flex-wrap:wrap">
+     <button id="igSaveBtn">💾 Spremi u Moje recepte</button>
+     <button id="igOpenInCreatorBtn" class="secondary">🍽️ Otvori i dorađuj u Kreatoru obroka</button>
+    </div>
+   </div>
+  </div>
+ </section>
+
+ <!-- 9. BACKUP -->
+ <section id="backupTab" class="view">
+  <div class="viewHead">
+   <div>
+    <h2>💾 Sigurnosna kopija (Backup)</h2>
+    <p>Izvezi sve svoje recepte, favorite, vlastite namirnice i postavke u JSON datoteku ili ih vrati na novo računalo.</p>
+   </div>
+  </div>
+  <div class="card">
+   <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button id="exportBackupBtn">💾 Preuzmi osobni Backup (JSON)</button>
+    <button id="importBackupBtn" class="secondary">📂 Učitaj Backup datoteku</button>
+    <input id="backupFileInput" type="file" accept=".json,application/json" style="display:none">
+   </div>
+   <div id="backupStatus" class="hint" style="margin-top:12px"></div>
+  </div>
+ </section>
+</main>
+
+<!-- DIALOG: Uređivanje proizvoda / Favorita -->
+<dialog id="productDialog">
+ <form method="dialog" id="productForm">
+  <h3 id="productDialogTitle" style="margin-top:0">Proizvod</h3>
+  <input type="hidden" id="editType">
+  <input type="hidden" id="editId">
+  <div class="grid2">
+   <label>Naziv proizvoda<input id="pName" required></label>
+   <label>Marka / Brand<input id="pBrand"></label>
+   <label>Pakiranje (količina)<input id="pPack" type="number" step="any" min="0" required></label>
+   <label>Jedinica
+    <select id="pUnit">
+     <option value="g">gram (g)</option>
+     <option value="ml">mililitar (ml)</option>
+     <option value="kom">komad (kom)</option>
+    </select>
+   </label>
+   <label>Cijena pakiranja (€)<input id="pPrice" type="number" step="0.01" min="0"></label>
+   <label>Trgovina / Izvor<input id="pStore" placeholder="npr. Konzum, Lidl, Proteini.si"></label>
+   <label>Barkod / EAN<input id="pBarcode" placeholder="npr. 3850123456789"></label>
+   <div style="align-self:end;display:flex;gap:6px">
+    <button type="button" id="lookupOffBtn" class="secondary" style="flex:1;font-size:12px;padding:9px 6px" title="Open Food Facts baza po barkodu">🌐 OFF barkod</button>
+    <button type="button" id="lookupUsdaBtn" class="secondary" style="flex:1;font-size:12px;padding:9px 6px" title="Pretraži USDA bazu po nazivu">🔍 USDA baza</button>
+   </div>
+   <label>Kalorije (kcal / 100 g/ml)<input id="pKcal" type="number" step="0.1" min="0"></label>
+   <label>Proteini (g / 100 g/ml)<input id="pProtein" type="number" step="0.1" min="0"></label>
+   <label>Ugljikohidrati (g / 100 g/ml)<input id="pCarbs" type="number" step="0.1" min="0"></label>
+   <label>Masti (g / 100 g/ml)<input id="pFat" type="number" step="0.1" min="0"></label>
+  </div>
+  <div id="macroLookupStatus" class="hint" style="margin-top:10px"></div>
+  <div class="actions" style="margin-top:18px">
+   <button value="cancel" class="secondary">Odustani</button>
+   <button id="productSave" value="default">Spremi</button>
+  </div>
+ </form>
+</dialog>
+
+<!-- DIALOG: Sinkronizacija cijene.dev -->
+<dialog id="syncDialog">
+ <div>
+  <h3 style="margin-top:0">Sinkronizacija cjenika s cijene.dev</h3>
+  <p class="hint">Preuzima se najnovija službena arhiva. Odaberi samo lance u kojima kupuješ kako bi baza bila optimalna i brza.</p>
+  <div id="chainChecks" class="checks" style="margin:16px 0"></div>
+  <div id="syncProgress" class="progress">Spremno za preuzimanje.</div>
+  <div class="actions" style="margin-top:16px">
+   <button id="syncCancel" class="secondary">Zatvori</button>
+   <button id="syncStart">Započni preuzimanje</button>
+  </div>
+ </div>
+</dialog>
+
+<script src="db.js"></script>
+<script src="zip.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+document.getElementById('openApp').addEventListener('click',()=>chrome.runtime.openOptionsPage());
+document.getElementById('openIg').addEventListener('click',()=>chrome.tabs.create({url:chrome.runtime.getURL('importer.html')}));
