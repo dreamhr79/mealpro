@@ -1458,16 +1458,33 @@ $('#chainChecks').innerHTML = Object.entries(CHAINS).map(([k, v]) => `
 `).join('');
 
 async function fetchWithCorsFallback(url, options = {}) {
+  // 1. Probaj direktno (za Chrome ekstenziju ili ako server dopusti CORS)
   try {
     const r = await fetch(url, options);
     if (r.ok) return r;
-  } catch (err) {
-    console.warn('Direct fetch failed, trying CORS proxy...', err);
+  } catch (e) {
+    console.warn('Direktni fetch nije uspio, isprobavam proxy 1...', e);
   }
-  const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(url);
-  const r2 = await fetch(proxyUrl, options);
-  if (!r2.ok) throw Error('HTTP ' + r2.status);
-  return r2;
+
+  // 2. Proxy 1: corsproxy.io
+  try {
+    const p1 = 'https://corsproxy.io/?' + encodeURIComponent(url);
+    const r1 = await fetch(p1, options);
+    if (r1.ok) return r1;
+  } catch (e) {
+    console.warn('Proxy 1 nije uspio, isprobavam proxy 2...', e);
+  }
+
+  // 3. Proxy 2: allorigins.win
+  try {
+    const p2 = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+    const r2 = await fetch(p2, options);
+    if (r2.ok) return r2;
+  } catch (e) {
+    console.warn('Proxy 2 nije uspio...', e);
+  }
+
+  throw Error('Neuspješno dohvaćanje podataka (CORS blokada ili prekid veze).');
 }
 
 $('#syncStart').onclick = async () => {
