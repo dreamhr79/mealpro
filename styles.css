@@ -124,3 +124,44 @@ dialog::backdrop{background:#0f172a66}
 .noMacroBadge:hover{background:#fee2e2;color:#991b1b}
 .quickEditMacro{cursor:pointer;color:#b42318;font-weight:700;text-decoration:underline}
 .quickEditMacro:hover{color:#991b1b}
+/* Mobilne prilagodbe za PWA / Web */
+#tabs {
+  display: flex;
+  overflow-x: auto;
+  white-space: nowrap;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #fff;
+  border-bottom: 1px solid #cbd5e1;
+  -webkit-overflow-scrolling: touch;
+}
+
+#tabs button {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.card {
+  padding: 12px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  overflow-x: hidden;
+}
+
+.grid2, .grid4 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 640px) {
+  .grid2 { grid-template-columns: 1fr 1fr; }
+  .grid4 { grid-template-columns: repeat(4, 1fr); }
+}
+
+input, select, button {
+  max-width: 100%;
+  box-sizing: border-box;
+}
