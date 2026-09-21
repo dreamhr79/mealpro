@@ -15,10 +15,10 @@ function norm(s) { return String(s ?? '').normalize('NFD').replace(/[\u0300-\u03
 function tokens(s) { return [...new Set(norm(s).replace(/[^a-z0-9čćžšđ]+/g, ' ').split(/\s+/).filter(x => x.length >= 2))]; }
 function eur(n) { return Number(n || 0).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' }); }
 function num(v, d = 1) { const n = Number(v || 0); return n.toLocaleString('hr-HR', { maximumFractionDigits: d, minimumFractionDigits: (d === 0 ? 0 : 1) }); }
-
 function hasNoMacros(p) {
   return ![p?.kcal, p?.protein, p?.carbs, p?.fat].some(v => Number(v) > 0);
 }
+
 function id() { return crypto.randomUUID(); }
 
 function showToast(msg) {
@@ -123,37 +123,6 @@ function calcSmartPack(rawQty, rawUnit, name, price = 0, ppu = 0) {
   return { pack: pack > 0 ? pack : 100, unit: parsedUnit, source: 'fallback' };
 }
 
-function repairProductPackage(p) {
-  if (!p) return p;
-  // Ako je jedinica 'kom', ali u nazivu ima npr. "500 g", "1 l", "150g", "400ml" etc.
-  if (p.unit === 'kom' || !p.unit || Number(p.pack) <= 1) {
-    const fn = packFromName(p.name);
-    if (fn && fn.pack >= 5) {
-      p.pack = fn.pack;
-      p.unit = fn.unit;
-      if (p.price > 0 && p.pack > 0 && (p.unit === 'g' || p.unit === 'ml')) {
-        p.pricePer100 = (p.price / p.pack) * 100;
-      }
-    }
-  }
-  return p;
-}
-
-function repairProductPackage(p) {
-  if (!p) return p;
-  if (p.unit === 'kom' || !p.unit || Number(p.pack) <= 1) {
-    const fn = packFromName(p.name);
-    if (fn && fn.pack >= 5) {
-      p.pack = fn.pack;
-      p.unit = fn.unit;
-      if (p.price > 0 && p.pack > 0 && (p.unit === 'g' || p.unit === 'ml')) {
-        p.pricePer100 = (p.price / p.pack) * 100;
-      }
-    }
-  }
-  return p;
-}
-
 function resolveMealItemProduct(it) {
   if (!it) return { id: id(), name: 'Nepoznato', pack: 100, unit: 'g', price: 0, kcal: 0, protein: 0, carbs: 0, fat: 0 };
   let p = it.product;
@@ -178,34 +147,20 @@ function resolveMealItemProduct(it) {
   return repairProductPackage(p);
 }
 
-async function propagateProductUpdate(updatedObj) {
-  for (const r of recipes) {
-    let changed = false;
-    for (const it of r.items || []) {
-      if (it.product && (String(it.product.id) === String(updatedObj.id) || (updatedObj.barcode && String(it.product.barcode) === String(updatedObj.barcode)))) {
-        it.product = { ...updatedObj };
-        changed = true;
+function repairProductPackage(p) {
+  if (!p) return p;
+  // Ako je jedinica 'kom', ali u nazivu ima npr. "500 g", "1 l", "150g", "400ml" etc.
+  if (p.unit === 'kom' || !p.unit || Number(p.pack) <= 1) {
+    const fn = packFromName(p.name);
+    if (fn && fn.pack >= 5) {
+      p.pack = fn.pack;
+      p.unit = fn.unit;
+      if (p.price > 0 && p.pack > 0 && (p.unit === 'g' || p.unit === 'ml')) {
+        p.pricePer100 = (p.price / p.pack) * 100;
       }
     }
-    if (changed) {
-      await dbPut('recipes', r);
-    }
   }
-  if (dayPlan && dayPlan.blocks) {
-    for (const b of dayPlan.blocks) {
-      for (const it of b.items || []) {
-        if (it.product && (String(it.product.id) === String(updatedObj.id) || (updatedObj.barcode && String(it.product.barcode) === String(updatedObj.barcode)))) {
-          it.product = { ...updatedObj };
-        }
-      }
-    }
-    await saveDayPlan();
-  }
-  for (const it of meal.items || []) {
-    if (it.product && (String(it.product.id) === String(updatedObj.id) || (updatedObj.barcode && String(it.product.barcode) === String(updatedObj.barcode)))) {
-      it.product = { ...updatedObj };
-    }
-  }
+  return p;
 }
 
 // === Open Food Facts API (Macro enrichment) ===
@@ -332,7 +287,7 @@ function renderMeal() {
 
   box.innerHTML = meal.items.length ? meal.items.map((it, i) => {
     const p = resolveMealItemProduct(it);
-    it.product = p;
+    it.product = p; // osiguraj da je povezan
     const q = Number(it.qty) || 0;
     const f = (p.unit === 'kom' ? q : q / 100);
     const scaledMacroHtml = hasNoMacros(p)
@@ -592,8 +547,18 @@ document.addEventListener('input', e => {
       meal.items[idx].qty = val;
       const row = e.target.closest('.mealIng');
       if (row) {
+        const p = meal.items[idx].product;
         const costEl = row.querySelector('.rowCost');
-        if (costEl) costEl.textContent = eur(itemCost(meal.items[idx].product, val));
+        if (costEl) costEl.textContent = eur(itemCost(p, val));
+        const macroEl = row.querySelector('.rowMacro');
+        if (macroEl) {
+          if (hasNoMacros(p)) {
+            macroEl.innerHTML = `<span class="quickEditMacro editProduct" data-type="${p.store ? 'favorites' : 'custom'}" data-id="${p.id}" title="Klikni za unos makroa">&#9888;&#65039; 0 kcal &middot; Upiši makrose &#9997;&#65039;</span>`;
+          } else {
+            const f = (p.unit === 'kom' ? val : val / 100);
+            macroEl.innerHTML = `${num((Number(p.kcal)||0)*f, 0)} kcal &middot; P ${num((Number(p.protein)||0)*f)} g &middot; UH ${num((Number(p.carbs)||0)*f)} g &middot; M ${num((Number(p.fat)||0)*f)} g <span class="small" style="opacity:.75">(za ${val} ${p.unit||'g'})</span>`;
+          }
+        }
       }
       updateMealTotals();
     }
@@ -603,32 +568,31 @@ document.addEventListener('input', e => {
 document.addEventListener('click', e => {
   const minusBtn = e.target.closest('.mealQtyMinus');
   const plusBtn = e.target.closest('.mealQtyPlus');
-  if (minusBtn) {
-    const idx = Number(minusBtn.dataset.i);
+  if (minusBtn || plusBtn) {
+    const btn = minusBtn || plusBtn;
+    const idx = Number(btn.dataset.i);
     if (meal.items[idx]) {
       const step = (meal.items[idx].product.unit === 'kom') ? 1 : 5;
-      meal.items[idx].qty = Math.max(0, (Number(meal.items[idx].qty) || 0) - step);
-      const row = minusBtn.closest('.mealIng');
+      if (minusBtn) meal.items[idx].qty = Math.max(0, (Number(meal.items[idx].qty) || 0) - step);
+      else meal.items[idx].qty = (Number(meal.items[idx].qty) || 0) + step;
+      
+      const row = btn.closest('.mealIng');
       if (row) {
+        const val = meal.items[idx].qty;
+        const p = meal.items[idx].product;
         const inp = row.querySelector('.mealQty');
-        if (inp) inp.value = meal.items[idx].qty;
+        if (inp) inp.value = val;
         const costEl = row.querySelector('.rowCost');
-        if (costEl) costEl.textContent = eur(itemCost(meal.items[idx].product, meal.items[idx].qty));
-      }
-      updateMealTotals();
-    }
-  }
-  if (plusBtn) {
-    const idx = Number(plusBtn.dataset.i);
-    if (meal.items[idx]) {
-      const step = (meal.items[idx].product.unit === 'kom') ? 1 : 5;
-      meal.items[idx].qty = (Number(meal.items[idx].qty) || 0) + step;
-      const row = plusBtn.closest('.mealIng');
-      if (row) {
-        const inp = row.querySelector('.mealQty');
-        if (inp) inp.value = meal.items[idx].qty;
-        const costEl = row.querySelector('.rowCost');
-        if (costEl) costEl.textContent = eur(itemCost(meal.items[idx].product, meal.items[idx].qty));
+        if (costEl) costEl.textContent = eur(itemCost(p, val));
+        const macroEl = row.querySelector('.rowMacro');
+        if (macroEl) {
+          if (hasNoMacros(p)) {
+            macroEl.innerHTML = `<span class="quickEditMacro editProduct" data-type="${p.store ? 'favorites' : 'custom'}" data-id="${p.id}" title="Klikni za unos makroa">&#9888;&#65039; 0 kcal &middot; Upiši makrose &#9997;&#65039;</span>`;
+          } else {
+            const f = (p.unit === 'kom' ? val : val / 100);
+            macroEl.innerHTML = `${num((Number(p.kcal)||0)*f, 0)} kcal &middot; P ${num((Number(p.protein)||0)*f)} g &middot; UH ${num((Number(p.carbs)||0)*f)} g &middot; M ${num((Number(p.fat)||0)*f)} g <span class="small" style="opacity:.75">(za ${val} ${p.unit||'g'})</span>`;
+          }
+        }
       }
       updateMealTotals();
     }
@@ -961,55 +925,20 @@ function renderFavorites() {
   listEl.innerHTML = sortedCategories.map(cat => {
     const items = catMap.get(cat);
     return `
-    <details class="favCategorySection" open>
-      <summary class="favCategoryTitle">
-        <div style="display:flex;align-items:center;gap:8px">
-          <span class="categoryArrow">&#9654;</span>
-          <h3 style="margin:0;font-size:16px;color:var(--accent)">📂 ${esc(cat)}</h3>
-        </div>
+    <div class="favCategorySection">
+      <div class="favCategoryTitle">
+        <h3>📂 ${esc(cat)}</h3>
         <span class="pill">${items.length} ${items.length === 1 ? 'namirnica' : 'namirnice'}</span>
-      </summary>
-      <div class="cards" style="margin-top:12px">
+      </div>
+      <div class="cards">
         ${items.map(p => productCard(p, 'favorites')).join('')}
       </div>
-    </details>`;
+    </div>`;
   }).join('');
 }
 
 function renderCustom() {
-  const listEl = $('#customList');
-  if (!listEl) return;
-  if (!custom.length) {
-    listEl.innerHTML = '<div class="empty">Nema osobnih namirnica. Klikni "+ Novi proizvod".</div>';
-    return;
-  }
-  const catMap = new Map();
-  for (const p of custom) {
-    const c = getFavoriteCategory(p);
-    if (!catMap.has(c)) catMap.set(c, []);
-    catMap.get(c).push(p);
-  }
-  const sortedCategories = [...catMap.keys()].sort((a, b) => {
-    if (a === 'Ostalo') return 1;
-    if (b === 'Ostalo') return -1;
-    return a.localeCompare(b, 'hr');
-  });
-  listEl.innerHTML = sortedCategories.map(cat => {
-    const items = catMap.get(cat);
-    return `
-    <details class="favCategorySection" open>
-      <summary class="favCategoryTitle">
-        <div style="display:flex;align-items:center;gap:8px">
-          <span class="categoryArrow">&#9654;</span>
-          <h3 style="margin:0;font-size:16px;color:var(--accent)">📂 ${esc(cat)}</h3>
-        </div>
-        <span class="pill">${items.length} ${items.length === 1 ? 'proizvod' : 'proizvoda'}</span>
-      </summary>
-      <div class="cards" style="margin-top:12px">
-        ${items.map(p => productCard(p, 'custom')).join('')}
-      </div>
-    </details>`;
-  }).join('');
+  $('#customList').innerHTML = custom.length ? custom.map(p => productCard(p, 'custom')).join('') : '<div class="empty">Nema osobnih namirnica. Klikni "+ Novi proizvod".</div>';
 }
 
 $('#addCustom').onclick = () => openProductDialog('custom');
@@ -1052,6 +981,36 @@ $('#lookupOffBtn').onclick = async () => {
     $('#macroLookupStatus').textContent = 'Barkod nije pronađen u Open Food Facts. Unesi ručno.';
   }
 };
+
+async function propagateProductUpdate(updatedObj) {
+  for (const r of recipes) {
+    let changed = false;
+    for (const it of r.items || []) {
+      if (it.product && (String(it.product.id) === String(updatedObj.id) || (updatedObj.barcode && String(it.product.barcode) === String(updatedObj.barcode)))) {
+        it.product = { ...updatedObj };
+        changed = true;
+      }
+    }
+    if (changed) {
+      await dbPut('recipes', r);
+    }
+  }
+  if (dayPlan && dayPlan.blocks) {
+    for (const b of dayPlan.blocks) {
+      for (const it of b.items || []) {
+        if (it.product && (String(it.product.id) === String(updatedObj.id) || (updatedObj.barcode && String(it.product.barcode) === String(updatedObj.barcode)))) {
+          it.product = { ...updatedObj };
+        }
+      }
+    }
+    await saveDayPlan();
+  }
+  for (const it of meal.items || []) {
+    if (it.product && (String(it.product.id) === String(updatedObj.id) || (updatedObj.barcode && String(it.product.barcode) === String(updatedObj.barcode)))) {
+      it.product = { ...updatedObj };
+    }
+  }
+}
 
 $('#productForm').onsubmit = async e => {
   if (e.submitter?.value === 'cancel') return;
@@ -1147,7 +1106,7 @@ function renderRecipes() {
 }
 
 function loadRecipe(rid) {
-  const r = recipes.find(x => String(x.id) === String(rid));
+  const r = recipes.find(x => x.id === rid);
   if (!r) return;
   const resolvedItems = (r.items || []).map(it => ({
     ...it,
@@ -1498,6 +1457,19 @@ $('#chainChecks').innerHTML = Object.entries(CHAINS).map(([k, v]) => `
   <label><input type="checkbox" value="${k}" ${['konzum', 'lidl', 'spar', 'plodine', 'tommy', 'eurospin', 'kaufland'].includes(k) ? 'checked' : ''}>${v}</label>
 `).join('');
 
+async function fetchWithCorsFallback(url, options = {}) {
+  try {
+    const r = await fetch(url, options);
+    if (r.ok) return r;
+  } catch (err) {
+    console.warn('Direct fetch failed, trying CORS proxy...', err);
+  }
+  const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(url);
+  const r2 = await fetch(proxyUrl, options);
+  if (!r2.ok) throw Error('HTTP ' + r2.status);
+  return r2;
+}
+
 $('#syncStart').onclick = async () => {
   const chains = $$('#chainChecks input:checked').map(x => x.value);
   if (!chains.length) return alert('Odaberi barem jedan lanac.');
@@ -1505,13 +1477,12 @@ $('#syncStart').onclick = async () => {
 
   try {
     log('Dohvaćam popis arhiva s api.cijene.dev…');
-    const lr = await fetch('https://api.cijene.dev/v0/list');
-    if (!lr.ok) throw Error('HTTP ' + lr.status);
+    const lr = await fetchWithCorsFallback('https://api.cijene.dev/v0/list');
     const list = await lr.json(), latest = list.archives?.[0];
     if (!latest?.url) throw Error('Nema dostupnih arhiva.');
 
     log(`Preuzimam arhivu ${latest.date}…`);
-    const zr = await fetch(latest.url);
+    const zr = await fetchWithCorsFallback(latest.url);
     if (!zr.ok) throw Error('Greška pri preuzimanju arhive: HTTP ' + zr.status);
     const buf = await zr.arrayBuffer();
 
