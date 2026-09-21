@@ -1499,10 +1499,15 @@ $('#syncStart').onclick = async () => {
     const list = await lr.json(), latest = list.archives?.[0];
     if (!latest?.url) throw Error('Nema dostupnih arhiva.');
 
-    log(`Preuzimam arhivu ${latest.date}…`);
-    const zr = await fetchWithCorsFallback(latest.url);
-    if (!zr.ok) throw Error('Greška pri preuzimanju arhive: HTTP ' + zr.status);
-    const buf = await zr.arrayBuffer();
+    let buf = manualZipBuffer;
+    if (!buf) {
+      log(`Preuzimam arhivu ${latest.date}…`);
+      const zr = await fetchWithCorsFallback(latest.url);
+      if (!zr.ok) throw Error('Greška pri preuzimanju arhive: HTTP ' + zr.status);
+      buf = await zr.arrayBuffer();
+    } else {
+      log('Koristim ručno učitani ZIP...');
+    }
 
     log(`ZIP ${(buf.byteLength / 1024 / 1024).toFixed(1)} MB. Otvaram odabrane lance…`);
     const wanted = n => chains.some(c => n === `${c}/products.csv` || n === `${c}/prices.csv`);
@@ -2058,3 +2063,20 @@ $('#backupFileInput').onchange = async e => {
 
 // Initial Start
 loadAll().catch(e => console.error('Start error:', e));
+
+
+let manualZipBuffer = null;
+document.addEventListener('change', async e => {
+  if (e.target.id === 'syncZipFileInput') {
+    const f = e.target.files[0];
+    if (f) {
+      $('#syncProgress').textContent = 'Učitavam lokalni ZIP...';
+      try {
+        manualZipBuffer = await f.arrayBuffer();
+        $('#syncProgress').textContent = 'Lokalni ZIP je učitan! Sada klikni "Započni preuzimanje" za obradu.';
+      } catch (err) {
+        $('#syncProgress').textContent = 'Greška pri čitanju ZIP-a: ' + err.message;
+      }
+    }
+  }
+});
