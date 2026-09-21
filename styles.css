@@ -165,3 +165,66 @@ input, select, button {
   max-width: 100%;
   box-sizing: border-box;
 }
+/* V3.2.7 Dodatne mobilne korekcije protiv ispadanja sadržaja */
+body, html {
+  overflow-x: hidden;
+  width: 100%;
+}
+
+main {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 10px;
+}
+
+#tabs {
+  display: flex;
+  overflow-x: auto;
+  white-space: nowrap;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+  -webkit-overflow-scrolling: touch;
+}
+
+#tabs button {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.card, .item {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  padding: 14px;
+}
+
+.mealIng {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 110px 45px 65px 36px;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #edf1f5;
+  width: 100%;
+}
+
+@media(max-width: 600px) {
+  .mealIng {
+    grid-template-columns: 1fr 90px 50px 32px;
+  }
+  .mealIng .price {
+    display: none;
+  }
+  .productRow {
+    grid-template-columns: 1fr auto;
+    gap: 6px;
+  }
+  .productRow > *:nth-child(2), .productRow > *:nth-child(3) {
+    display: none;
+  }
+}
