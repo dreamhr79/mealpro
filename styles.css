@@ -228,3 +228,56 @@ main {
     display: none;
   }
 }
+/* V3.2.8 Hamburger & Mobile Sidebar Drawer */
+#mobileOverlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  z-index: 998;
+}
+#mobileOverlay.show {
+  display: block;
+}
+
+@media (max-width: 850px) {
+  #hamburgerBtn {
+    display: inline-flex !important;
+  }
+  #tabs {
+    display: none !important;
+  }
+  nav.mobileDrawer {
+    display: flex !important;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: -280px;
+    width: 280px;
+    height: 100vh;
+    background: #fff;
+    z-index: 999;
+    box-shadow: 5px 0 25px rgba(0,0,0,0.15);
+    transition: left 0.3s ease;
+    padding: 20px 12px;
+    gap: 8px;
+    overflow-y: auto;
+  }
+  nav.mobileDrawer.open {
+    left: 0;
+  }
+  nav.mobileDrawer button {
+    text-align: left;
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 15px;
+    background: transparent;
+    color: var(--ink);
+  }
+  nav.mobileDrawer button.active {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: none;
+  }
+}

@@ -2080,3 +2080,42 @@ document.addEventListener('change', async e => {
     }
   }
 });
+
+
+
+// V3.2.8 Hamburger Menu Controller
+document.addEventListener('DOMContentLoaded', () => {
+  const nav = $('#tabs');
+  if (nav) nav.classList.add('mobileDrawer');
+  
+  if (!document.getElementById('mobileOverlay')) {
+    const overlay = document.createElement('div');
+    overlay.id = 'mobileOverlay';
+    document.body.appendChild(overlay);
+    
+    overlay.onclick = () => {
+      nav.classList.remove('open');
+      overlay.classList.remove('show');
+    };
+  }
+
+  const hb = $('#hamburgerBtn');
+  if (hb) {
+    hb.onclick = () => {
+      nav.classList.toggle('open');
+      $('#mobileOverlay').classList.toggle('show');
+    };
+  }
+
+  // Close drawer when clicking any tab on mobile
+  $$('#tabs button').forEach(b => {
+    const origOnClick = b.onclick;
+    b.onclick = (e) => {
+      if (origOnClick) origOnClick(e);
+      const navEl = $('#tabs');
+      if (navEl) navEl.classList.remove('open');
+      const ov = $('#mobileOverlay');
+      if (ov) ov.classList.remove('show');
+    };
+  });
+});
