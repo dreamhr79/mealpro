@@ -1457,6 +1457,19 @@ $('#chainChecks').innerHTML = Object.entries(CHAINS).map(([k, v]) => `
   <label><input type="checkbox" value="${k}" ${['konzum', 'lidl', 'spar', 'plodine', 'tommy', 'eurospin', 'kaufland'].includes(k) ? 'checked' : ''}>${v}</label>
 `).join('');
 
+async function fetchWithCorsFallback(url, options = {}) {
+  try {
+    const r = await fetch(url, options);
+    if (r.ok) return r;
+  } catch (err) {
+    console.warn('Direct fetch failed, trying CORS proxy...', err);
+  }
+  const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(url);
+  const r2 = await fetch(proxyUrl, options);
+  if (!r2.ok) throw Error('HTTP ' + r2.status);
+  return r2;
+}
+
 $('#syncStart').onclick = async () => {
   const chains = $$('#chainChecks input:checked').map(x => x.value);
   if (!chains.length) return alert('Odaberi barem jedan lanac.');
@@ -1464,13 +1477,13 @@ $('#syncStart').onclick = async () => {
 
   try {
     log('Dohvaćam popis arhiva s api.cijene.dev…');
-    const lr = await fetch('https://api.cijene.dev/v0/list');
+    const lr = await fetchWithCorsFallback('https://api.cijene.dev/v0/list');
     if (!lr.ok) throw Error('HTTP ' + lr.status);
     const list = await lr.json(), latest = list.archives?.[0];
     if (!latest?.url) throw Error('Nema dostupnih arhiva.');
 
     log(`Preuzimam arhivu ${latest.date}…`);
-    const zr = await fetch(latest.url);
+    const zr = await fetchWithCorsFallback(latest.url);
     if (!zr.ok) throw Error('Greška pri preuzimanju arhive: HTTP ' + zr.status);
     const buf = await zr.arrayBuffer();
 
