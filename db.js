@@ -166,6 +166,8 @@ async function dbSyncCatalogModel(products,offers,syncedAt){
  const d=await openDB();
  const oldOffers=await dbAll('offers');
  const oldById=new Map(oldOffers.map(o=>[o.id,o]));
+ const newIds=new Set((offers||[]).map(o=>o.id));
+ const removed=oldOffers.filter(o=>!newIds.has(o.id));
  const changed=[];
  for(const o of offers||[]){
   const prev=oldById.get(o.id);
@@ -188,7 +190,9 @@ async function dbSyncCatalogModel(products,offers,syncedAt){
   for(const o of offers||[])os.put(o);
   // History grows only when an offer is new or its effective price/sale state changed.
   for(const h of changed)hs.add(h);
-  tx.oncomplete=()=>res({products:(products||[]).length,offers:(offers||[]).length,priceChanges:changed.length});
+  // A missing offer is represented by its absence from the current offers store.
+  // We do not create history rows for disappearance, keeping history price-only.
+  tx.oncomplete=()=>res({products:(products||[]).length,offers:(offers||[]).length,priceChanges:changed.length,removedOffers:removed.length});
   tx.onerror=()=>rej(tx.error||Error('Sinkronizacija modela proizvoda i cijena nije uspjela.'));
   tx.onabort=()=>rej(tx.error||Error('Sinkronizacija modela proizvoda i cijena je prekinuta.'));
  });
