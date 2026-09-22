@@ -2519,7 +2519,11 @@ $('#backupFileInput').onchange = async e => {
 };
 
 // Initial Start
-loadAll().catch(e => {
+loadAll().then(() => {
+  // Keep persisted favorites useful offline, then opportunistically refresh
+  // their commercial data when the central catalog is configured/reachable.
+  setTimeout(() => refreshFavoritesFromCatalog({ silent: true }), 250);
+}).catch(e => {
   console.error('Start error:', e);
   const syncState = $('#syncState');
   if (syncState) syncState.textContent = 'Greška pri učitavanju lokalnih podataka. Osvježi aplikaciju i pokušaj ponovno.';
