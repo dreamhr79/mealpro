@@ -73,6 +73,11 @@ export async function readRemoteZipCsv(url:string,entry:ZipEntry,visit:(row:stri
     const chunk=value||"";
     for(let i=0;i<chunk.length;i++){
       const ch=chunk[i];
+      if(pendingQuote){
+        pendingQuote=false;
+        if(ch==='"'){cur+='"';continue;}
+        quoted=false;
+      }
       if(quoted){
         if(ch==='"'){
           if(i+1<chunk.length&&chunk[i+1]==='"'){cur+='"';i++;}
@@ -80,17 +85,13 @@ export async function readRemoteZipCsv(url:string,entry:ZipEntry,visit:(row:stri
           else quoted=false;
         }else cur+=ch;
       }else{
-        if(pendingQuote){
-          pendingQuote=false;
-          if(ch==='"'){cur+='"';quoted=true;continue;}
-        }
         if(ch==='"')quoted=true;
         else if(ch===','){row.push(cur);cur="";}
         else if(ch==='\n')await emit();
         else cur+=ch;
       }
     }
-    if(pendingQuote){quoted=false;pendingQuote=false;}
   }
+  if(pendingQuote){quoted=false;pendingQuote=false;}
   if(cur||row.length)await emit();
 }
