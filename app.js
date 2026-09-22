@@ -60,6 +60,33 @@ function canonicalProductKey(product) {
   return barcode ? `ean:${barcode}` : `catalog:${String(product?.id || product?.externalId || '')}`;
 }
 
+function offerFromCatalogRow(row) {
+  return {
+    id: row.id,
+    productKey: canonicalProductKey(row),
+    store: row.store || '',
+    price: Number(row.price) || 0,
+    pack: Number(row.pack) || 0,
+    unit: row.unit || 'kom',
+    pricePer100: Number.isFinite(Number(row.pricePer100)) ? Number(row.pricePer100) : null,
+    onSale: !!row.onSale
+  };
+}
+
+function sortOffersByPrice(offers) {
+  return [...offers].sort((a, b) => {
+    const ap = Number(a.price), bp = Number(b.price);
+    const aHas = Number.isFinite(ap) && ap > 0, bHas = Number.isFinite(bp) && bp > 0;
+    if (aHas && bHas && ap !== bp) return ap - bp;
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    return getUnitValuePer100(a) - getUnitValuePer100(b);
+  });
+}
+
+function favoriteOfferSnapshot(rows) {
+  return sortOffersByPrice(rows).map(offerFromCatalogRow);
+}
+
 function packFromName(name) {
   const s = String(name || '').toLowerCase().replace(/,/g, '.').replace(/\s+/g, ' ').trim();
   if (!s) return null;
@@ -825,13 +852,7 @@ async function favoriteFromCatalog(cid) {
   // Isti EAN predstavlja isti fizički proizvod/pakiranje, pa je za favorita
   // relevantna najniža cijena pakiranja. €/100 g ostaje informativna metrika
   // za usporedbu različitih proizvoda i veličina pakiranja.
-  allOffers.sort((a, b) => {
-    const ap = Number(a.price), bp = Number(b.price);
-    const aHas = Number.isFinite(ap) && ap > 0, bHas = Number.isFinite(bp) && bp > 0;
-    if (aHas && bHas && ap !== bp) return ap - bp;
-    if (aHas !== bHas) return aHas ? -1 : 1;
-    return getUnitValuePer100(a) - getUnitValuePer100(b);
-  });
+  allOffers = sortOffersByPrice(allOffers);
 
   const bestOffer = allOffers[0];
 
@@ -856,10 +877,7 @@ async function favoriteFromCatalog(cid) {
     existingFav.unit = bestOffer.unit;
     existingFav.pricePer100 = bestOffer.pricePer100;
     existingFav.onSale = bestOffer.onSale;
-    existingFav.offers = allOffers.map(o => ({
-      id: o.id, store: o.store, price: o.price, pack: o.pack, unit: o.unit,
-      pricePer100: o.pricePer100, onSale: o.onSale
-    }));
+    existingFav.offers = favoriteOfferSnapshot(allOffers);
     await dbPut('favorites', existingFav);
     await propagateProductUpdate(existingFav);
     await loadAll();
@@ -880,10 +898,7 @@ async function favoriteFromCatalog(cid) {
     store: bestOffer.store,
     pricePer100: bestOffer.pricePer100,
     onSale: bestOffer.onSale,
-    offers: allOffers.map(o => ({
-      id: o.id, store: o.store, price: o.price, pack: o.pack, unit: o.unit,
-      pricePer100: o.pricePer100, onSale: o.onSale
-    })),
+    offers: favoriteOfferSnapshot(allOffers),
     kcal: 0, protein: 0, carbs: 0, fat: 0,
     addedAt: new Date().toISOString()
   };
@@ -1822,13 +1837,7 @@ $('#syncStart').onclick = async () => {
       }
       if (!offers.length) continue;
 
-      offers.sort((a, b) => {
-        const ap = Number(a.price), bp = Number(b.price);
-        const aHas = Number.isFinite(ap) && ap > 0, bHas = Number.isFinite(bp) && bp > 0;
-        if (aHas && bHas && ap !== bp) return ap - bp;
-        if (aHas !== bHas) return aHas ? -1 : 1;
-        return getUnitValuePer100(a) - getUnitValuePer100(b);
-      });
+      offers = sortOffersByPrice(offers);
       const best = offers[0];
       Object.assign(f, {
         catalogId: best.id,
@@ -1841,10 +1850,7 @@ $('#syncStart').onclick = async () => {
         unit: best.unit,
         pricePer100: best.pricePer100,
         onSale: best.onSale,
-        offers: offers.map(o => ({
-          id: o.id, store: o.store, price: o.price, pack: o.pack, unit: o.unit,
-          pricePer100: o.pricePer100, onSale: o.onSale
-        }))
+        offers: favoriteOfferSnapshot(offers)
       });
       await dbPut('favorites', f);
       await propagateProductUpdate(f);
