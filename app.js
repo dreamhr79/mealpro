@@ -9,7 +9,15 @@ let dayPlan = { goals: { kcal: 2200, protein: 160, carbs: 220, fat: 70 }, blocks
 let toastTimer;
 
 const $ = s => document.querySelector(s);
-const $$ = s => [...document.querySelectorAll(s)];
+const $ = s => [...document.querySelectorAll(s)];
+window.addEventListener('error', e => {
+  console.error('MealPro runtime error:', e.error || e.message);
+  const state = document.querySelector('#syncState');
+  if (state) state.textContent = 'Greška aplikacije — osvježi stranicu';
+});
+window.addEventListener('unhandledrejection', e => {
+  console.error('MealPro async error:', e.reason);
+});
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function norm(s) { return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLowerCase().trim(); }
 function tokens(s) { return [...new Set(norm(s).replace(/[^a-z0-9čćžšđ]+/g, ' ').split(/\s+/).filter(x => x.length >= 2))]; }
