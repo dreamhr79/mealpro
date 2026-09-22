@@ -66,7 +66,15 @@ function packFromName(name) {
     }
   }
 
-  // 2. Direct weight/volume in title: e.g. "500 G", "500g", "1 kg", "250 ml", "0.5 l", "1.5 l"
+  // 2. Piece multipack: e.g. "10 kom", "6 komada". Keep quantity in pieces
+  // so recipe costing and the shopping list can divide package price correctly.
+  let pc = s.match(/(?:^|\s)(\d{1,3})\s*(?:kom|komada|komad)\b/i);
+  if (pc) {
+    const count = Number(pc[1]);
+    if (count > 0 && count <= 200) return { pack: count, unit: 'kom', source: 'name-pieces' };
+  }
+
+  // 3. Direct weight/volume in title: e.g. "500 G", "500g", "1 kg", "250 ml", "0.5 l", "1.5 l"
   const ms = [...s.matchAll(/(\d+(?:\.\d+)?)\s*(kg|g|l|ml)\b/ig)];
   if (ms.length) {
     const z = ms[ms.length - 1], n = Number(z[1]), u = z[2].toLowerCase();
