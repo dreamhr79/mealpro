@@ -357,13 +357,20 @@ async function loadAll() {
 }
 
 // Tabs
-$$('#tabs button').forEach(b => b.onclick = () => {
-  $$('#tabs button').forEach(x => x.classList.remove('active'));
-  b.classList.add('active');
-  $$('.view').forEach(v => v.classList.remove('active'));
-  $('#' + b.dataset.tab).classList.add('active');
-  if (b.dataset.tab === 'shoplist') renderShoppingList();
-});
+function activateTab(tab) {
+  const target = $('#tabs button[data-tab="' + tab + '"]');
+  if (!target) return;
+  $('#tabs button').forEach(x => x.classList.toggle('active', x.dataset.tab === tab));
+  $('.view').forEach(v => v.classList.toggle('active', v.id === tab));
+  $('#mobileBottomNav [data-mobile-tab]').forEach(x => x.classList.toggle('active', x.dataset.mobileTab === tab));
+  if (tab === 'shoplist') renderShoppingList();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+$('#tabs button').forEach(b => b.onclick = () => activateTab(b.dataset.tab));
+$('#mobileBottomNav [data-mobile-tab]').forEach(b => b.onclick = () => activateTab(b.dataset.mobileTab));
+const mobileMoreBtn = $('#mobileMoreBtn');
+if (mobileMoreBtn) mobileMoreBtn.onclick = () => $('#hamburgerBtn')?.click();
 
 // Picker Tabs inside Creator
 $$('.pickerTabs button').forEach(b => b.onclick = () => {
@@ -975,7 +982,7 @@ async function addCatalogToMeal(cid) {
   const f = await favoriteFromCatalog(cid);
   if (!f) return;
   meal.items.push({ product: { ...f }, qty: f.unit === 'kom' ? 1 : 100 });
-  $('#tabs button[data-tab="creator"]').click();
+  activateTab('creator');
   renderMeal();
 }
 
