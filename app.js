@@ -462,6 +462,7 @@ function renderMeal() {
   box.innerHTML = meal.items.length ? meal.items.map((it, i) => {
     const p = resolveMealItemProduct(it);
     it.product = p; // osiguraj da je povezan
+    it.productId = p.id || it.productId || null;
     const q = Number(it.qty) || 0;
     const f = (p.unit === 'kom' ? q : q / 100);
     const scaledMacroHtml = hasNoMacros(p)
@@ -486,6 +487,13 @@ function renderMeal() {
   }).join('') : '<div class="empty">Dodaj namirnice iz Favorita, Mojih proizvoda ili Baze.</div>';
 
   updateMealTotals();
+}
+
+function compactMealItems(items = meal.items) {
+  return items.filter(it => Number(it?.qty) > 0).map(it => {
+    const p = resolveMealItemProduct(it);
+    return { productId: p.id || it.productId || null, product: { ...p }, qty: Number(it.qty) };
+  });
 }
 
 function updateEditingBanner() {
@@ -521,7 +529,8 @@ $('#saveRecipe').onclick = async () => {
   try {
   const name = $('#mealName').value.trim();
   if (!name) return alert('Upiši naziv obroka.');
-  if (!meal.items.length) return alert('Dodaj barem jednu namirnicu.');
+  const saveItems = compactMealItems();
+  if (!saveItems.length) return alert('Dodaj barem jednu namirnicu s količinom većom od 0.');
   const serv = Math.max(1, Number($('#mealServings').value || 1));
 
   // 1. Ako se uređuje već otvoreni recept -> ažuriraj postojeći zapis
@@ -530,7 +539,7 @@ $('#saveRecipe').onclick = async () => {
     if (existing) {
       existing.name = name;
       existing.servings = serv;
-      existing.items = structuredClone(meal.items);
+      existing.items = structuredClone(saveItems);
       existing.updatedAt = new Date().toISOString();
       await dbPut('recipes', existing);
       recipes = await dbAll('recipes');
@@ -546,7 +555,7 @@ $('#saveRecipe').onclick = async () => {
   if (sameName) {
     if (confirm(`Recept s nazivom "${name}" već postoji u bazi.\n\nKlikni [U redu] za AŽURIRANJE postojećeg recepta,\nili [Odustani] ako želiš spremiti kao novu kopiju.`)) {
       sameName.servings = serv;
-      sameName.items = structuredClone(meal.items);
+      sameName.items = structuredClone(saveItems);
       sameName.updatedAt = new Date().toISOString();
       await dbPut('recipes', sameName);
       meal.recipeId = sameName.id;
@@ -563,7 +572,7 @@ $('#saveRecipe').onclick = async () => {
     id: id(),
     name,
     servings: serv,
-    items: structuredClone(meal.items),
+    items: structuredClone(saveItems),
     instructions: meal.instructions || '',
     authorMacros: meal.authorMacros || null,
     savedAt: new Date().toISOString()
