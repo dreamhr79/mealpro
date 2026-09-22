@@ -86,9 +86,12 @@ with tempfile.NamedTemporaryFile(suffix=".zip") as tmp:
                     key=f"ean:{code}" if code else f"source:{chain}:{pid}"
                     products.append({"id":key,"barcode":code or None,"name":name,"brand":brand,"pack":pk,"unit":u,"search_text":norm(f"{name} {brand} {code}")})
                     offers.append({"id":f"{chain}:{pid}","product_id":key,"store":NAMES.get(chain,chain),"price":bp[0],"pack":pk,"unit":u,"price_per_100":bp[0]/pk*100 if u in ("g","ml") and pk>0 else None,"on_sale":False})
-                    if len(products)>=500:
-                        post({"mode":"stage","products":products,"offers":offers}); products=[]; offers=[]
-            if products or offers: post({"mode":"stage","products":products,"offers":offers})
+                    if len(products)>=300:
+                        unique_products=list({p["id"]:p for p in products}.values())
+                        post({"mode":"stage","products":unique_products,"offers":offers}); products=[]; offers=[]
+            if products or offers:
+                unique_products=list({p["id"]:p for p in products}.values())
+                post({"mode":"stage","products":unique_products,"offers":offers})
             print(f"Staged {chain}: {len(best)} priced product ids")
 result=post({"mode":"publish","syncId":sync_id})
 print(json.dumps(result,ensure_ascii=False))
