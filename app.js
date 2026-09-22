@@ -55,6 +55,21 @@ function normalizeBarcode(value) {
   return code.length >= 8 ? code : '';
 }
 
+function archiveTime(archive) {
+  const candidates = [archive?.date, archive?.createdAt, archive?.created_at, archive?.timestamp];
+  for (const value of candidates) {
+    const t = Date.parse(value || '');
+    if (Number.isFinite(t)) return t;
+  }
+  const urlDate = String(archive?.url || '').match(/(20\d{2})[-_/]?(\d{2})[-_/]?(\d{2})/);
+  return urlDate ? Date.UTC(Number(urlDate[1]), Number(urlDate[2]) - 1, Number(urlDate[3])) : 0;
+}
+
+function newestArchive(archives) {
+  const valid = (Array.isArray(archives) ? archives : []).filter(a => a?.url);
+  return valid.sort((a, b) => archiveTime(b) - archiveTime(a))[0] || null;
+}
+
 function canonicalProductKey(product) {
   const barcode = normalizeBarcode(product?.barcode);
   if (barcode) return `ean:${barcode}`;
@@ -1800,7 +1815,7 @@ $('#syncStart').onclick = async () => {
     log('Dohvaćam popis arhiva s api.cijene.dev…');
     const lr = await fetchWithCorsFallback('https://api.cijene.dev/v0/list');
     if (!lr.ok) throw Error('HTTP ' + lr.status);
-    const list = await lr.json(), latest = list.archives?.[0];
+    const list = await lr.json(), latest = newestArchive(list.archives);
     if (!latest?.url) throw Error('Nema dostupnih arhiva.');
 
     const usingManualZip = !!manualZipBuffer;
