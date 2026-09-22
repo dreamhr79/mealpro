@@ -1,0 +1,27 @@
+name: Daily catalog sync
+
+on:
+  schedule:
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: mealpro-catalog-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Supabase catalog sync
+        env:
+          CATALOG_SYNC_URL: ${{ secrets.CATALOG_SYNC_URL }}
+          CATALOG_SYNC_TOKEN: ${{ secrets.CATALOG_SYNC_TOKEN }}
+        run: |
+          test -n "$CATALOG_SYNC_URL"
+          test -n "$CATALOG_SYNC_TOKEN"
+          curl --fail-with-body --retry 2 --max-time 900 \
+            -X POST "$CATALOG_SYNC_URL" \
+            -H "Authorization: Bearer $CATALOG_SYNC_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{}'

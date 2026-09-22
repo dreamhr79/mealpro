@@ -185,8 +185,8 @@ async function dbSyncCatalogModel(products,offers,syncedAt){
  for(const o of offers||[]){
   const prev=oldById.get(o.id);
   // The first normalized sync establishes the baseline. History records actual
-  // subsequent price/sale changes only, avoiding one history row per catalog item.
-  if(prev && (Number(prev.price)!==Number(o.price) || !!prev.onSale!==!!o.onSale)){
+  // subsequent price changes only, avoiding one history row per catalog item.
+  if(prev && Number(prev.price)!==Number(o.price)){
    changed.push({
     productKey:o.productKey,offerId:o.id,store:o.store,price:o.price,
     previousPrice:Number(prev.price)||0,onSale:!!o.onSale,recordedAt:syncedAt
@@ -204,7 +204,7 @@ async function dbSyncCatalogModel(products,offers,syncedAt){
   // Offers store contains current state only, so stale prices do not accumulate here.
   os.clear();
   for(const o of offers||[])os.put(o);
-  // History grows only when an offer is new or its effective price/sale state changed.
+  // History grows only when an existing offer's price changed.
   for(const h of changed)hs.add(h);
   // A missing offer is represented by its absence from the current offers store.
   // We do not create history rows for disappearance, keeping history price-only.

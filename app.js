@@ -805,7 +805,7 @@ async function searchCatalog(inp, out) {
   
   // Uvijek osvježi najnovije favorite iz baze prije prikaza
   favorites = await dbAll('favorites');
-  const normalizedRows = await dbSearchProductsWithOffers(q, 150);
+  const normalizedRows = await CatalogRepository.search(q, 150);
   const rows = normalizedRows.map(({ product, offers }) => {
     const sorted = sortOffersByPrice(offers);
     const best = sorted[0];
@@ -912,7 +912,7 @@ $('#creatorCatalogBtn').onclick = () => searchCatalog($('#creatorCatalogSearch')
 $('#creatorCatalogSearch').onkeydown = e => { if (e.key === 'Enter') searchCatalog(e.target, $('#creatorCatalogResults')); };
 
 async function favoriteFromCatalog(productKey) {
-  const normalized = await dbGetProductWithOffers(productKey);
+  const normalized = await CatalogRepository.getProduct(productKey);
   if (!normalized?.product || !normalized.offers?.length) return;
 
   const p = normalized.product;
