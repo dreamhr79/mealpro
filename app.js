@@ -449,11 +449,14 @@ $('#addMealToDayPlan').onclick = async () => {
   if (!meal.items.length) return alert('Obrok nema sastojaka.');
   const name = $('#mealName').value.trim() || 'Obrok';
   const divisor = Math.max(1, meal.servings || 1);
-  const blockItems = meal.items.map(it => ({
-    productId: it.product.id,
-    product: it.product,
-    qty: (Number(it.qty) || 0) / divisor
-  }));
+  const blockItems = meal.items.map(it => {
+    const p = resolveMealItemProduct(it);
+    return {
+      productId: p.id || it.productId || null,
+      product: { ...p },
+      qty: (Number(it.qty) || 0) / divisor
+    };
+  });
   dayPlan.blocks.push({ id: Date.now(), name, items: blockItems });
   await saveDayPlan();
   renderDayPlan();
@@ -1284,10 +1287,11 @@ document.addEventListener('change', async e => {
     if (!r) return;
     const bi = Number(e.target.closest('.card').dataset.bi);
     const div = Math.max(1, r.servings || 1);
-    for (const it of r.items) {
+    for (const it of r.items || []) {
+      const p = resolveMealItemProduct(it);
       dayPlan.blocks[bi].items.push({
-        productId: it.product.id,
-        product: it.product,
+        productId: p.id || it.productId || null,
+        product: { ...p },
         qty: (Number(it.qty) || 0) / div
       });
     }
