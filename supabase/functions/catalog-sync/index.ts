@@ -87,6 +87,35 @@ Deno.serve(async (req) => {
   let syncId: number | undefined;
   const requestBody = await req.json().catch(() => ({}));
   try {
+    // Lightweight ingestion protocol: heavy ZIP/CSV processing can run on GitHub Actions,
+    // while this function only performs authenticated database writes.
+    if (requestBody?.mode === "start") {
+      await supabase("catalog_syncs?status=eq.running&finished_at=is.null", {
+        method:"PATCH",
+        body:JSON.stringify({status:"failed",finished_at:new Date().toISOString(),missing_chains:["Previous sync was interrupted before completion"]})
+      });
+      const listRes = await fetch("https://api.cijene.dev/v0/list");
+      if (!listRes.ok) throw new Error(`cijene.dev list failed: ${listRes.status}`);
+      const list = await listRes.json();
+      const archive = newestArchive(Array.isArray(list?.archives) ? list.archives : []);
+      if (!archive?.url) throw new Error("No valid cijene.dev archive");
+      const id = await createSync(archive);
+      await clearStage();
+      return Response.json({ok:true,syncId:id,archiveDate:archive.date||null,archiveUrl:archive.url},{headers:corsHeaders});
+    }
+    if (requestBody?.mode === "stage") {
+      const products = Array.isArray(requestBody.products) ? requestBody.products : [];
+      const offers = Array.isArray(requestBody.offers) ? requestBody.offers : [];
+      if (products.length) await stageRows("catalog_products_stage", products);
+      if (offers.length) await stageRows("catalog_offers_stage", offers);
+      return Response.json({ok:true,products:products.length,offers:offers.length},{headers:corsHeaders});
+    }
+    if (requestBody?.mode === "publish") {
+      const id = Number(requestBody.syncId);
+      if (!(id > 0)) throw new Error("Missing syncId");
+      const applied = await applyStage(id);
+      return Response.json({ok:true,syncId:id,applied,stage:"published"},{headers:corsHeaders});
+    }
     // A hard runtime kill cannot execute catch/finally. Mark abandoned attempts
     // from previous invocations before starting a fresh sync.
     await supabase("catalog_syncs?status=eq.running&finished_at=is.null", {
