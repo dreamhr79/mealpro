@@ -527,8 +527,14 @@ document.addEventListener('click', async e => {
   if (b.classList.contains('editProduct')) openProductDialog(b.dataset.type, b.dataset.id);
   if (b.classList.contains('deleteProduct')) {
     if (confirm('Obrisati ovaj proizvod?')) {
-      await dbDelete(b.dataset.type, b.dataset.id);
-      await loadAll();
+      try {
+        await dbDelete(b.dataset.type, b.dataset.id);
+        await loadAll();
+        showToast('Proizvod je obrisan.');
+      } catch (err) {
+        console.error('Product delete error:', err);
+        showToast('Brisanje proizvoda nije uspjelo.');
+      }
     }
   }
   if (b.classList.contains('favFromCatalog')) {
@@ -550,10 +556,20 @@ document.addEventListener('click', async e => {
   if (b.classList.contains('baseToMeal')) await addCatalogToMeal(b.dataset.id);
   if (b.classList.contains('deleteRecipe')) {
     if (confirm('Obrisati recept?')) {
-      await dbDelete('recipes', b.dataset.id);
-      recipes = await dbAll('recipes');
-      renderRecipes();
-      $('#recipeCount').textContent = `(${recipes.length})`;
+      try {
+        await dbDelete('recipes', b.dataset.id);
+        recipes = await dbAll('recipes');
+        if (meal.recipeId === b.dataset.id) {
+          meal.recipeId = null;
+          updateEditingBanner();
+        }
+        renderRecipes();
+        $('#recipeCount').textContent = `(${recipes.length})`;
+        showToast('Recept je obrisan.');
+      } catch (err) {
+        console.error('Recipe delete error:', err);
+        showToast('Brisanje recepta nije uspjelo.');
+      }
     }
   }
   if (b.classList.contains('loadRecipe')) loadRecipe(b.dataset.id);
