@@ -856,9 +856,10 @@ document.addEventListener('click', async e => {
     b.disabled = true;
     const oldText = b.textContent;
     b.textContent = 'Tražim…';
-    await refreshCatalogRecipeAlternatives(b.dataset.id);
+    const found = await refreshCatalogRecipeAlternatives(b.dataset.id);
     b.disabled = false;
     b.textContent = oldText;
+    showToast(found ? `Pronađeno jeftinijih alternativa: ${found}` : 'Nema sigurnih jeftinijih alternativa u bazi.');
   }
   if (b.classList.contains('recipeDayPlan')) await addRecipeToDayPlan(b.dataset.id, 1);
   if (b.classList.contains('recipeScale')) loadScaledRecipe(b.dataset.id, b.dataset.servings);
@@ -1507,16 +1508,17 @@ async function findCatalogRecipeAlternative(product) {
 
 async function refreshCatalogRecipeAlternatives(recipeId) {
   const recipe = recipes.find(r => r.id === recipeId);
-  if (!recipe) return;
+  if (!recipe) return 0;
   const live = recipeLiveState(recipe);
-  let changed = false;
+  let changed = false, found = 0;
   for (const item of live.items) {
     if (item.cheaperAlternative) continue;
     const key = `${recipe.id}:${item.productId}`;
     const alt = await findCatalogRecipeAlternative(item.product);
-    if (alt) { recipeCatalogAlternatives.set(key, alt); changed = true; }
+    if (alt) { recipeCatalogAlternatives.set(key, alt); changed = true; found++; }
   }
   if (changed) renderRecipes();
+  return found;
 }
 
 function recipeLiveState(recipe) {
