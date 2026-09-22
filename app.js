@@ -1138,12 +1138,17 @@ $('#productForm').onsubmit = async e => {
     updatedAt: new Date().toISOString()
   };
 
-  await dbPut(type, obj);
-  await propagateProductUpdate(obj);
-  $('#productDialog').close();
-  await loadAll();
-  renderMeal();
-  showToast('✓ Proizvod i cijene u receptima su uspješno ažurirani!');
+  try {
+    await dbPut(type, obj);
+    await propagateProductUpdate(obj);
+    $('#productDialog').close();
+    await loadAll();
+    renderMeal();
+    showToast('✓ Proizvod i cijene u receptima su uspješno ažurirani!');
+  } catch (err) {
+    console.error('Product save error:', err);
+    showToast('Spremanje proizvoda nije uspjelo.');
+  }
 };
 
 // === RECEPTI ===
@@ -1346,17 +1351,31 @@ async function saveDayPlan() {
 
 $('#addEmptyDayBlock').onclick = async () => {
   const name = ($('#dayBlockName').value || 'Obrok').trim();
-  dayPlan.blocks.push({ id: Date.now(), name, items: [] });
-  $('#dayBlockName').value = '';
-  await saveDayPlan();
-  renderDayPlan();
+  const block = { id: Date.now(), name, items: [] };
+  dayPlan.blocks.push(block);
+  try {
+    await saveDayPlan();
+    $('#dayBlockName').value = '';
+    renderDayPlan();
+  } catch (err) {
+    dayPlan.blocks.pop();
+    console.error('Add day block error:', err);
+    showToast('Dodavanje bloka nije uspjelo.');
+  }
 };
 
 $('#clearDayPlan').onclick = async () => {
   if (confirm('Očistiti sve obroke iz Dnevnog plana?')) {
+    const previousBlocks = dayPlan.blocks;
     dayPlan.blocks = [];
-    await saveDayPlan();
-    renderDayPlan();
+    try {
+      await saveDayPlan();
+      renderDayPlan();
+    } catch (err) {
+      dayPlan.blocks = previousBlocks;
+      console.error('Clear day plan error:', err);
+      showToast('Brisanje Dnevnog plana nije uspjelo.');
+    }
   }
 };
 
@@ -1368,6 +1387,7 @@ document.addEventListener('change', async e => {
     if (!r) return;
     const bi = Number(e.target.closest('.card').dataset.bi);
     const div = Math.max(1, r.servings || 1);
+    const beforeLength = dayPlan.blocks[bi].items.length;
     for (const it of r.items || []) {
       const p = resolveMealItemProduct(it);
       dayPlan.blocks[bi].items.push({
@@ -1376,8 +1396,14 @@ document.addEventListener('change', async e => {
         qty: (Number(it.qty) || 0) / div
       });
     }
-    await saveDayPlan();
-    renderDayPlan();
+    try {
+      await saveDayPlan();
+      renderDayPlan();
+    } catch (err) {
+      dayPlan.blocks[bi].items.splice(beforeLength);
+      console.error('Add recipe to day plan error:', err);
+      showToast('Dodavanje recepta u Dnevni plan nije uspjelo.');
+    }
   }
 });
 
