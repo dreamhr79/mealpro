@@ -1288,15 +1288,19 @@ function renderDayPlan() {
         </div>
       </div>
       <div>
-        ${(b.items || []).map((it, ii) => `
+        ${(b.items || []).map((it, ii) => {
+          const p = resolveMealItemProduct(it);
+          it.product = p;
+          return `
           <div style="display:grid;grid-template-columns:minmax(200px,1fr) 90px 40px 80px 30px;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #edf1f5;font-size:13px">
-            <div><b>${esc(it.product.name)}</b> <span class="meta">${esc(it.product.store || '')}</span></div>
+            <div><b>${esc(p.name)}</b> <span class="meta">${esc(p.store || '')}</span></div>
             <input class="dayQtyInput" data-bi="${bi}" data-ii="${ii}" type="number" min="0" step="any" value="${it.qty}" style="margin:0;padding:6px">
-            <div style="color:var(--muted)">${esc(it.product.unit || 'g')}</div>
-            <div class="right">${eur(itemCost(it.product, it.qty))}</div>
+            <div style="color:var(--muted)">${esc(p.unit || 'g')}</div>
+            <div class="right">${eur(itemCost(p, it.qty))}</div>
             <button class="danger removeDayItem" data-bi="${bi}" data-ii="${ii}" style="padding:4px 8px;font-size:12px">×</button>
           </div>
-        `).join('') || '<div class="sub" style="padding:8px 0">Blok je prazan. Dodaj recept gore desno.</div>'}
+        `;
+        }).join('') || '<div class="sub" style="padding:8px 0">Blok je prazan. Dodaj recept gore desno.</div>'}
       </div>
     </div>`;
   }).join('') || '<div class="card empty">Dnevni plan je prazan. Upiši npr. "Doručak" i dodaj blok.</div>';
