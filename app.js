@@ -410,8 +410,8 @@ const mobileMoreBtn = $('#mobileMoreBtn');
 if (mobileMoreBtn) mobileMoreBtn.onclick = () => $('#hamburgerBtn')?.click();
 
 // Picker Tabs inside Creator
-$$$('.pickerTabs button').forEach(b => b.onclick = () => {
-  $$$('.pickerTabs button').forEach(x => x.classList.remove('active'));
+$('.pickerTabs button').forEach(b => b.onclick = () => {
+  $('.pickerTabs button').forEach(x => x.classList.remove('active'));
   b.classList.add('active');
   ['Favorites', 'Custom', 'Catalog'].forEach(t => {
     const el = $('#picker' + t);
@@ -2973,7 +2973,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Close drawer when clicking any tab on mobile
-  $$$('#tabs button').forEach(b => {
+  $('#tabs button').forEach(b => {
     const origOnClick = b.onclick;
     b.onclick = (e) => {
       if (origOnClick) origOnClick(e);
