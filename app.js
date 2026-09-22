@@ -489,6 +489,26 @@ function renderMeal() {
   updateMealTotals();
 }
 
+function updateMealIngredientRow(row, item, value) {
+  if (!row || !item) return;
+  const p = resolveMealItemProduct(item);
+  item.product = p;
+  item.productId = p.id || item.productId || null;
+  const val = Math.max(0, Number(value) || 0);
+  const inp = row.querySelector('.mealQty');
+  if (inp && document.activeElement !== inp) inp.value = val;
+  const costEl = row.querySelector('.rowCost');
+  if (costEl) costEl.textContent = eur(itemCost(p, val));
+  const macroEl = row.querySelector('.rowMacro');
+  if (!macroEl) return;
+  if (hasNoMacros(p)) {
+    macroEl.innerHTML = `<span class="quickEditMacro editProduct" data-type="${p.store ? 'favorites' : 'custom'}" data-id="${p.id}" title="Klikni za unos makroa">&#9888;&#65039; 0 kcal &middot; Upiši makrose &#9997;&#65039;</span>`;
+  } else {
+    const factor = p.unit === 'kom' ? val : val / 100;
+    macroEl.innerHTML = `${num((Number(p.kcal)||0)*factor, 0)} kcal &middot; P ${num((Number(p.protein)||0)*factor)} g &middot; UH ${num((Number(p.carbs)||0)*factor)} g &middot; M ${num((Number(p.fat)||0)*factor)} g <span class="small" style="opacity:.75">(za ${val} ${p.unit||'g'})</span>`;
+  }
+}
+
 function compactMealItems(items = meal.items) {
   return items.filter(it => Number(it?.qty) > 0).map(it => {
     const p = resolveMealItemProduct(it);
@@ -797,63 +817,28 @@ document.addEventListener('click', async e => {
 });
 
 document.addEventListener('input', e => {
-  if (e.target.classList.contains('mealQty')) {
-    const idx = Number(e.target.dataset.i);
-    const val = Math.max(0, Number(e.target.value || 0));
-    if (meal.items[idx]) {
-      meal.items[idx].qty = val;
-      const row = e.target.closest('.mealIng');
-      if (row) {
-        const p = meal.items[idx].product;
-        const costEl = row.querySelector('.rowCost');
-        if (costEl) costEl.textContent = eur(itemCost(p, val));
-        const macroEl = row.querySelector('.rowMacro');
-        if (macroEl) {
-          if (hasNoMacros(p)) {
-            macroEl.innerHTML = `<span class="quickEditMacro editProduct" data-type="${p.store ? 'favorites' : 'custom'}" data-id="${p.id}" title="Klikni za unos makroa">&#9888;&#65039; 0 kcal &middot; Upiši makrose &#9997;&#65039;</span>`;
-          } else {
-            const f = (p.unit === 'kom' ? val : val / 100);
-            macroEl.innerHTML = `${num((Number(p.kcal)||0)*f, 0)} kcal &middot; P ${num((Number(p.protein)||0)*f)} g &middot; UH ${num((Number(p.carbs)||0)*f)} g &middot; M ${num((Number(p.fat)||0)*f)} g <span class="small" style="opacity:.75">(za ${val} ${p.unit||'g'})</span>`;
-          }
-        }
-      }
-      updateMealTotals();
-    }
-  }
+  if (!e.target.classList.contains('mealQty')) return;
+  const idx = Number(e.target.dataset.i);
+  const item = meal.items[idx];
+  if (!item) return;
+  item.qty = Math.max(0, Number(e.target.value || 0));
+  updateMealIngredientRow(e.target.closest('.mealIng'), item, item.qty);
+  updateMealTotals();
 });
 
 document.addEventListener('click', e => {
   const minusBtn = e.target.closest('.mealQtyMinus');
   const plusBtn = e.target.closest('.mealQtyPlus');
-  if (minusBtn || plusBtn) {
-    const btn = minusBtn || plusBtn;
-    const idx = Number(btn.dataset.i);
-    if (meal.items[idx]) {
-      const step = (meal.items[idx].product.unit === 'kom') ? 1 : 5;
-      if (minusBtn) meal.items[idx].qty = Math.max(0, (Number(meal.items[idx].qty) || 0) - step);
-      else meal.items[idx].qty = (Number(meal.items[idx].qty) || 0) + step;
-      
-      const row = btn.closest('.mealIng');
-      if (row) {
-        const val = meal.items[idx].qty;
-        const p = meal.items[idx].product;
-        const inp = row.querySelector('.mealQty');
-        if (inp) inp.value = val;
-        const costEl = row.querySelector('.rowCost');
-        if (costEl) costEl.textContent = eur(itemCost(p, val));
-        const macroEl = row.querySelector('.rowMacro');
-        if (macroEl) {
-          if (hasNoMacros(p)) {
-            macroEl.innerHTML = `<span class="quickEditMacro editProduct" data-type="${p.store ? 'favorites' : 'custom'}" data-id="${p.id}" title="Klikni za unos makroa">&#9888;&#65039; 0 kcal &middot; Upiši makrose &#9997;&#65039;</span>`;
-          } else {
-            const f = (p.unit === 'kom' ? val : val / 100);
-            macroEl.innerHTML = `${num((Number(p.kcal)||0)*f, 0)} kcal &middot; P ${num((Number(p.protein)||0)*f)} g &middot; UH ${num((Number(p.carbs)||0)*f)} g &middot; M ${num((Number(p.fat)||0)*f)} g <span class="small" style="opacity:.75">(za ${val} ${p.unit||'g'})</span>`;
-          }
-        }
-      }
-      updateMealTotals();
-    }
-  }
+  if (!minusBtn && !plusBtn) return;
+  const btn = minusBtn || plusBtn;
+  const idx = Number(btn.dataset.i);
+  const item = meal.items[idx];
+  if (!item) return;
+  const p = resolveMealItemProduct(item);
+  const step = p.unit === 'kom' ? 1 : 5;
+  item.qty = Math.max(0, (Number(item.qty) || 0) + (minusBtn ? -step : step));
+  updateMealIngredientRow(btn.closest('.mealIng'), item, item.qty);
+  updateMealTotals();
 });
 $('#mealName').oninput = e => meal.name = e.target.value;
 $('#mealServings').oninput = e => { meal.servings = Math.max(1, Number(e.target.value || 1)); updateMealTotals(); };
