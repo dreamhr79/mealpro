@@ -1178,7 +1178,7 @@ function productCard(p, type) {
       <div class="name" style="font-size:15px">${esc(p.name)} ${saleBadge} ${unavailableBadge}</div>
       <div class="meta" style="font-size:13px">
         ${esc(p.brand || '')} · <b>${num(p.pack, 0)} ${esc(p.unit)}</b> · 
-        Najniža cijena: <b style="color:var(--accent);font-size:15px">${eur(p.price)}</b> (${esc(p.store || '')})
+        ${p.catalogAvailable === false ? 'Zadnja poznata cijena' : 'Najniža cijena'}: <b style="color:var(--accent);font-size:15px">${eur(p.price)}</b> (${esc(p.store || '')})
         ${p.barcode ? ` · <span style="opacity:.8">EAN: ${esc(p.barcode)}</span>` : ''}
       </div>
       <div>${unitBadge}</div>
