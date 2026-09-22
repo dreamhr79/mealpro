@@ -545,66 +545,68 @@ document.getElementById('cancelEditingRecipe')?.addEventListener('click', () => 
   showToast('Prekinuto uređivanje. Spremanje će sada stvoriti novi recept.');
 });
 
-$('#saveRecipe').onclick = async () => {
-  try {
-  const name = $('#mealName').value.trim();
-  if (!name) return alert('Upiši naziv obroka.');
-  const saveItems = compactMealItems();
-  if (!saveItems.length) return alert('Dodaj barem jednu namirnicu s količinom većom od 0.');
-  const serv = Math.max(1, Number($('#mealServings').value || 1));
-
-  // 1. Ako se uređuje već otvoreni recept -> ažuriraj postojeći zapis
-  if (meal.recipeId) {
-    const existing = recipes.find(x => x.id === meal.recipeId);
-    if (existing) {
-      existing.name = name;
-      existing.servings = serv;
-      existing.items = structuredClone(saveItems);
-      existing.updatedAt = new Date().toISOString();
-      await dbPut('recipes', existing);
-      recipes = await dbAll('recipes');
-      renderRecipes();
-      updateEditingBanner();
-      showToast(`✓ Recept "${name}" je uspješno ažuriran!`);
-      return;
-    }
-  }
-
-  // 2. Ako nije eksplicitno otvoren recept, provjeri postoji li već recept s istim imenom
-  const sameName = recipes.find(x => norm(x.name) === norm(name));
-  if (sameName) {
-    if (confirm(`Recept s nazivom "${name}" već postoji u bazi.\n\nKlikni [U redu] za AŽURIRANJE postojećeg recepta,\nili [Odustani] ako želiš spremiti kao novu kopiju.`)) {
-      sameName.servings = serv;
-      sameName.items = structuredClone(saveItems);
-      sameName.updatedAt = new Date().toISOString();
-      await dbPut('recipes', sameName);
-      meal.recipeId = sameName.id;
-      recipes = await dbAll('recipes');
-      renderRecipes();
-      updateEditingBanner();
-      showToast(`✓ Recept "${name}" je ažuriran!`);
-      return;
-    }
-  }
-
-  // 3. Inače spremi kao novi recept
-  const r = {
-    id: id(),
+function recipeDraft(nameOverride = null) {
+  const name = (nameOverride ?? $('#mealName').value).trim();
+  if (!name) throw new Error('NAME_REQUIRED');
+  const items = compactMealItems();
+  if (!items.length) throw new Error('ITEMS_REQUIRED');
+  return {
     name,
-    servings: serv,
-    items: structuredClone(saveItems),
+    servings: Math.max(1, Number($('#mealServings').value || 1)),
+    items: structuredClone(items),
     instructions: meal.instructions || '',
-    authorMacros: meal.authorMacros || null,
-    savedAt: new Date().toISOString()
+    authorMacros: meal.authorMacros || null
   };
-  await dbPut('recipes', r);
-  meal.recipeId = r.id;
+}
+
+async function persistRecipe(recipe, { asCurrent = true } = {}) {
+  await dbPut('recipes', recipe);
+  if (asCurrent) {
+    meal.recipeId = recipe.id;
+    meal.name = recipe.name;
+    $('#mealName').value = recipe.name;
+  }
   recipes = await dbAll('recipes');
   renderRecipes();
   updateEditingBanner();
   $('#recipeCount').textContent = `(${recipes.length})`;
-  showToast(`Recept "${name}" je spremljen!`);
+  return recipe;
+}
+
+function nextRecipeCopyName(baseName) {
+  const clean = String(baseName || 'Recept').replace(/\s+\(kopija(?: \d+)?\)$/i, '').trim() || 'Recept';
+  const used = new Set(recipes.map(r => norm(r.name)));
+  if (!used.has(norm(`${clean} (kopija)`))) return `${clean} (kopija)`;
+  let n = 2;
+  while (used.has(norm(`${clean} (kopija ${n})`))) n++;
+  return `${clean} (kopija ${n})`;
+}
+
+$('#saveRecipe').onclick = async () => {
+  try {
+    const draft = recipeDraft();
+    if (meal.recipeId) {
+      const existing = recipes.find(x => x.id === meal.recipeId);
+      if (existing) {
+        await persistRecipe({ ...existing, ...draft, updatedAt: new Date().toISOString() });
+        showToast(`✓ Recept "${draft.name}" je uspješno ažuriran!`);
+        return;
+      }
+    }
+
+    const sameName = recipes.find(x => norm(x.name) === norm(draft.name));
+    if (sameName && confirm(`Recept s nazivom "${draft.name}" već postoji u bazi.\n\nKlikni [U redu] za AŽURIRANJE postojećeg recepta,\nili [Odustani] ako želiš spremiti kao novu kopiju.`)) {
+      await persistRecipe({ ...sameName, ...draft, updatedAt: new Date().toISOString() });
+      showToast(`✓ Recept "${draft.name}" je ažuriran!`);
+      return;
+    }
+
+    const name = sameName ? nextRecipeCopyName(draft.name) : draft.name;
+    await persistRecipe({ id: id(), ...draft, name, savedAt: new Date().toISOString() });
+    showToast(`Recept "${name}" je spremljen!`);
   } catch (err) {
+    if (err?.message === 'NAME_REQUIRED') return alert('Upiši naziv obroka.');
+    if (err?.message === 'ITEMS_REQUIRED') return alert('Dodaj barem jednu namirnicu s količinom većom od 0.');
     console.error('Recipe save error:', err);
     showToast('Spremanje recepta nije uspjelo. Postojeći podaci nisu obrisani.');
   }
@@ -612,30 +614,13 @@ $('#saveRecipe').onclick = async () => {
 
 document.getElementById('saveRecipeCopy')?.addEventListener('click', async () => {
   try {
-  const baseName = $('#mealName').value.trim() || 'Recept';
-  const copyName = baseName.includes('(kopija)') ? baseName : `${baseName} (kopija)`;
-  const serv = Math.max(1, Number($('#mealServings').value || 1));
-  if (!meal.items.length) return alert('Dodaj barem jednu namirnicu.');
-
-  const r = {
-    id: id(),
-    name: copyName,
-    servings: serv,
-    items: structuredClone(meal.items),
-    instructions: meal.instructions || '',
-    authorMacros: meal.authorMacros || null,
-    savedAt: new Date().toISOString()
-  };
-  await dbPut('recipes', r);
-  meal.recipeId = r.id;
-  meal.name = copyName;
-  $('#mealName').value = copyName;
-  recipes = await dbAll('recipes');
-  renderRecipes();
-  updateEditingBanner();
-  $('#recipeCount').textContent = `(${recipes.length})`;
-  showToast(`Spremljeno kao novi recept: "${copyName}"!`);
+    const baseName = $('#mealName').value.trim() || 'Recept';
+    const copyName = nextRecipeCopyName(baseName);
+    const draft = recipeDraft(copyName);
+    await persistRecipe({ id: id(), ...draft, savedAt: new Date().toISOString() });
+    showToast(`Spremljeno kao novi recept: "${copyName}"!`);
   } catch (err) {
+    if (err?.message === 'ITEMS_REQUIRED') return alert('Dodaj barem jednu namirnicu s količinom većom od 0.');
     console.error('Recipe copy save error:', err);
     showToast('Spremanje kopije recepta nije uspjelo.');
   }
