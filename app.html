@@ -393,20 +393,29 @@
  <div class="dialogInner">
   <h3 style="margin-top:0">Centralna baza cijena</h3>
   <p class="muted">MealPro koristi centralni Supabase katalog. ZIP s cijene.dev obrađuje se na serveru; preglednik ga više ne preuzima.</p>
+  <div class="syncChainSection">
+   <b>Odaberi lance koje želiš u bazi</b>
+   <div id="chainChecks" class="chainChecks"></div>
+   <div class="syncChainActions">
+    <button type="button" id="syncSelectAll" class="secondary">Odaberi sve</button>
+    <button type="button" id="syncSelectNone" class="secondary">Poništi</button>
+   </div>
+  </div>
   <div id="syncProgress" class="progress">Provjeravam stanje centralne baze…</div>
   <div class="dialogActions">
    <button id="syncCancel" class="secondary">Zatvori</button>
-   <button id="syncStart">Provjeri sada</button>
+   <button id="syncCheck" class="secondary">Provjeri stanje</button>
+   <button id="syncStart">Ažuriraj odabrane lance</button>
   </div>
  </div>
 </dialog>
 
 <script src="cache-reset.js"></script>
-  <script src="db.js?v=central2"></script>
-<script src="zip.js?v=central2"></script>
-<script src="config.js?v=central2"></script>
-<script src="supabase-catalog-adapter.js?v=central2"></script>
-<script src="catalog-repository.js?v=central2"></script>
-<script src="app.js?v=central2"></script>
+  <script src="db.js?v=chains1"></script>
+<script src="zip.js?v=chains1"></script>
+<script src="config.js?v=chains1"></script>
+<script src="supabase-catalog-adapter.js?v=chains1"></script>
+<script src="catalog-repository.js?v=chains1"></script>
+<script src="app.js?v=chains1"></script>
 </body>
 </html>
