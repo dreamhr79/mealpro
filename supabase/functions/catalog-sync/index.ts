@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
 
     const allowedChains = ["konzum","lidl","spar","plodine","tommy","eurospin","kaufland","studenac","ktc","metro","ribola","ntl"];
     const requested = Array.isArray(requestBody?.chains) ? requestBody.chains.map((x:unknown) => String(x).toLowerCase()) : [];
-    const chains = (requested.length ? requested : ["konzum","lidl","spar","plodine","tommy","kaufland"])
+    const chains = (requested.length ? requested : ["konzum"])
       .filter((x:string, i:number, a:string[]) => allowedChains.includes(x) && a.indexOf(x) === i);
     if (!chains.length) throw new Error("No supported chains selected");
 
