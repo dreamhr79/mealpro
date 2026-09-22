@@ -1402,8 +1402,11 @@ function renderRecipes() {
           <button class="danger deleteRecipe" data-id="${r.id}">Obriši</button>
         </div>
       </div>
-      <div class="recipeItems" style="font-size:12px;color:var(--muted)">
-        ${items.map(x => `${num(x.qty, 0)} ${esc(x.product.unit || 'g')} ${esc(x.product.name)}`).join(' · ')}
+      <div class="recipeItems">
+        ${items.map(x => {
+          const unavailable = x.product.catalogAvailable === false ? '<span class="saleBadgeMini">nije u aktualnom katalogu</span>' : '';
+          return `<div class="recipeIngredient"><span><b>${esc(x.product.name)}</b> ${unavailable}</span><span>${num(x.qty, 0)} ${esc(x.product.unit || 'g')} · ${eur(itemCost(x.product, x.qty))}</span></div>`;
+        }).join('')}
       </div>
       ${instructionsHtml}
     </div>`;
