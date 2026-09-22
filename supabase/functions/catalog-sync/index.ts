@@ -44,6 +44,24 @@ async function createSync(archive: Archive) {
   return rows?.[0]?.id;
 }
 
+async function stageRows(table:string, rows:Record<string,unknown>[]) {
+  await supabase(table + "?on_conflict=id", {
+    method:"POST",
+    headers:{"Prefer":"resolution=merge-duplicates,return=minimal"},
+    body:JSON.stringify(rows)
+  });
+}
+async function clearStage() {
+  await supabase("catalog_offers_stage?id=not.is.null", {method:"DELETE"});
+  await supabase("catalog_products_stage?id=not.is.null", {method:"DELETE"});
+}
+async function applyStage(syncId:number) {
+  return supabase("rpc/apply_staged_catalog", {
+    method:"POST",
+    body:JSON.stringify({p_sync_id:syncId,p_observed_at:new Date().toISOString()})
+  });
+}
+
 async function failSync(id: number | undefined, message: string) {
   if (!id) return;
   await supabase(`catalog_syncs?id=eq.${id}`, {
@@ -89,10 +107,16 @@ Deno.serve(async (req) => {
     if (!model.products.length || !model.offers.length) throw new Error("Normalization produced an empty catalog");
     if (model.offers.some(o => !o.product_id || !(Number(o.price) > 0))) throw new Error("Normalization produced invalid offers");
 
+    await clearStage();
+    const batchSize = 1000;
+    for (let i=0;i<model.products.length;i+=batchSize) await stageRows("catalog_products_stage", model.products.slice(i,i+batchSize));
+    for (let i=0;i<model.offers.length;i+=batchSize) await stageRows("catalog_offers_stage", model.offers.slice(i,i+batchSize));
+    const applied = await applyStage(syncId!);
+
     return Response.json({
       ok:true, syncId, archiveDate:archive.date || null, archiveUrl:archive.url,
       archiveBytes:buffer.byteLength, products:model.products.length, offers:model.offers.length,
-      stage:"normalized"
+      applied, stage:"published"
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
