@@ -1629,14 +1629,52 @@ $('#syncStart').onclick = async () => {
     await dbClear('catalog');
     await dbBulkPut('catalog', all, (n, t) => log(`Spremanje: ${n.toLocaleString('hr-HR')} / ${t.toLocaleString('hr-HR')}`));
 
-    // Osvježi cijene postojećih favorita
+    // Osvježi cijene postojećih favorita. EAN je kanonski identitet proizvoda:
+    // isti fizički proizvod iz više trgovina ostaje jedan favorit s više ponuda.
     const byId = new Map(all.map(p => [p.id, p]));
+    const byBarcode = new Map();
+    for (const p of all) {
+      const barcode = String(p.barcode || '').trim();
+      if (!barcode) continue;
+      if (!byBarcode.has(barcode)) byBarcode.set(barcode, []);
+      byBarcode.get(barcode).push(p);
+    }
     for (const f of favorites) {
-      const cur = byId.get(f.catalogId);
-      if (cur) {
-        Object.assign(f, { price: cur.price, store: cur.store, pack: cur.pack, unit: cur.unit });
-        await dbPut('favorites', f);
+      let offers = [];
+      const barcode = String(f.barcode || '').trim();
+      if (barcode && byBarcode.has(barcode)) offers = byBarcode.get(barcode);
+      else {
+        const cur = byId.get(f.catalogId);
+        if (cur) offers = [cur];
       }
+      if (!offers.length) continue;
+
+      offers.sort((a, b) => {
+        const av = Number(a.pricePer100), bv = Number(b.pricePer100);
+        const aHas = Number.isFinite(av) && av > 0, bHas = Number.isFinite(bv) && bv > 0;
+        if (aHas && bHas && av !== bv) return av - bv;
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        return (Number(a.price) || Infinity) - (Number(b.price) || Infinity);
+      });
+      const best = offers[0];
+      Object.assign(f, {
+        catalogId: best.id,
+        barcode: best.barcode || f.barcode || '',
+        name: best.name || f.name,
+        brand: best.brand || f.brand || '',
+        price: best.price,
+        store: best.store,
+        pack: best.pack,
+        unit: best.unit,
+        pricePer100: best.pricePer100,
+        onSale: best.onSale,
+        offers: offers.map(o => ({
+          id: o.id, store: o.store, price: o.price, pack: o.pack, unit: o.unit,
+          pricePer100: o.pricePer100, onSale: o.onSale
+        }))
+      });
+      await dbPut('favorites', f);
+      await propagateProductUpdate(f);
     }
 
     await dbPut('meta', { key: 'sync', date: latest.date, count: all.length, syncedAt: new Date().toISOString() });
