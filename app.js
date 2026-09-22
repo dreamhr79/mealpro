@@ -1000,6 +1000,41 @@ async function favoriteFromCatalog(productKey) {
   showToast(`${newFav.name} je dodan u Favorite (najniža cijena: ${eur(newFav.price)} u ${newFav.store}).`);
   return newFav;
 }
+async function refreshFavoritesFromCatalog({ silent = true } = {}) {
+  if (!favorites.length || !CatalogRepository.isOnline()) return { refreshed: 0, unavailable: 0 };
+  let refreshed = 0, unavailable = 0;
+
+  for (const favorite of [...favorites]) {
+    const key = favorite.id?.startsWith('ean:') || favorite.id?.startsWith('source:')
+      ? favorite.id
+      : (normalizeBarcode(favorite.barcode) ? `ean:${normalizeBarcode(favorite.barcode)}` : '');
+    if (!key) continue;
+
+    try {
+      const current = await CatalogRepository.getProduct(key);
+      if (!current?.product || !current.offers?.length) {
+        const missing = { ...favorite, catalogAvailable: false, offers: [], onSale: false };
+        await dbPut('favorites', missing);
+        await propagateProductUpdate(missing);
+        unavailable++;
+        continue;
+      }
+      const updated = applyCatalogStateToFavorite(favorite, current.product, current.offers);
+      await dbPut('favorites', updated);
+      await propagateProductUpdate(updated);
+      refreshed++;
+    } catch (err) {
+      console.warn('Favorite refresh skipped:', favorite.id, err);
+    }
+  }
+
+  if (refreshed || unavailable) {
+    await loadAll();
+    if (!silent) showToast(`Favoriti osvježeni: ${refreshed}, nedostupni: ${unavailable}.`);
+  }
+  return { refreshed, unavailable };
+}
+
 async function addCatalogToMeal(cid) {
   const f = await favoriteFromCatalog(cid);
   if (!f) return;
