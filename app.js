@@ -196,10 +196,12 @@ async function loadAll() {
   favorites = (await dbAll('favorites')).map(repairProductPackage);
   custom = (await dbAll('custom')).map(repairProductPackage);
   recipes = (await dbAll('recipes')).map(r => {
-    if (r.items) {
-      r.items = r.items.map(it => ({ ...it, product: repairProductPackage(it.product) }));
-    }
-    return r;
+    const safeRecipe = r && typeof r === 'object' ? r : {};
+    safeRecipe.items = Array.isArray(safeRecipe.items)
+      ? safeRecipe.items.map(it => ({ ...it, product: resolveMealItemProduct(it) }))
+      : [];
+    safeRecipe.servings = Math.max(1, Number(safeRecipe.servings) || 1);
+    return safeRecipe;
   });
 
   // Automatsko uklanjanje privremenih fantomskih unosa iz 'Mojih proizvoda' ako su ranije nastali uvozom
@@ -213,7 +215,17 @@ async function loadAll() {
   if (mSync) $('#syncState').textContent = `Baza: ${mSync.date} · ${mSync.count.toLocaleString('hr-HR')} artikala`;
   
   const mDay = await dbGet('meta', 'dayPlan');
-  if (mDay && mDay.val) dayPlan = mDay.val;
+  if (mDay && mDay.val) {
+    dayPlan = mDay.val;
+    dayPlan.blocks = Array.isArray(dayPlan.blocks) ? dayPlan.blocks : [];
+    dayPlan.goals = dayPlan.goals || { kcal: 2200, protein: 160, carbs: 220, fat: 70 };
+    dayPlan.settings = dayPlan.settings || { kcalLocked: true, balance: 'carbs' };
+    for (const block of dayPlan.blocks) {
+      block.items = Array.isArray(block.items)
+        ? block.items.map(it => ({ ...it, product: resolveMealItemProduct(it) }))
+        : [];
+    }
+  }
 
   renderFavorites();
   renderCustom();
