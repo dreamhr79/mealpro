@@ -741,6 +741,10 @@ async function favoriteFromCatalog(cid) {
 
   if (existingFav) {
     // Spriječi dupliciranje i ažuriraj ponude trgovina i najnižu cijenu
+    existingFav.catalogId = bestOffer.id;
+    existingFav.name = bestOffer.name || existingFav.name;
+    existingFav.brand = bestOffer.brand || existingFav.brand || '';
+    existingFav.barcode = p.barcode || existingFav.barcode || '';
     existingFav.price = bestOffer.price;
     existingFav.store = bestOffer.store;
     existingFav.pack = bestOffer.pack;
