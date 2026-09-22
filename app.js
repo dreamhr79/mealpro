@@ -462,6 +462,7 @@ function renderMeal() {
   box.innerHTML = meal.items.length ? meal.items.map((it, i) => {
     const p = resolveMealItemProduct(it);
     it.product = p; // osiguraj da je povezan
+    it.productId = p.id || it.productId || null;
     const q = Number(it.qty) || 0;
     const f = (p.unit === 'kom' ? q : q / 100);
     const scaledMacroHtml = hasNoMacros(p)
@@ -486,6 +487,33 @@ function renderMeal() {
   }).join('') : '<div class="empty">Dodaj namirnice iz Favorita, Mojih proizvoda ili Baze.</div>';
 
   updateMealTotals();
+}
+
+function updateMealIngredientRow(row, item, value) {
+  if (!row || !item) return;
+  const p = resolveMealItemProduct(item);
+  item.product = p;
+  item.productId = p.id || item.productId || null;
+  const val = Math.max(0, Number(value) || 0);
+  const inp = row.querySelector('.mealQty');
+  if (inp && document.activeElement !== inp) inp.value = val;
+  const costEl = row.querySelector('.rowCost');
+  if (costEl) costEl.textContent = eur(itemCost(p, val));
+  const macroEl = row.querySelector('.rowMacro');
+  if (!macroEl) return;
+  if (hasNoMacros(p)) {
+    macroEl.innerHTML = `<span class="quickEditMacro editProduct" data-type="${p.store ? 'favorites' : 'custom'}" data-id="${p.id}" title="Klikni za unos makroa">&#9888;&#65039; 0 kcal &middot; Upiši makrose &#9997;&#65039;</span>`;
+  } else {
+    const factor = p.unit === 'kom' ? val : val / 100;
+    macroEl.innerHTML = `${num((Number(p.kcal)||0)*factor, 0)} kcal &middot; P ${num((Number(p.protein)||0)*factor)} g &middot; UH ${num((Number(p.carbs)||0)*factor)} g &middot; M ${num((Number(p.fat)||0)*factor)} g <span class="small" style="opacity:.75">(za ${val} ${p.unit||'g'})</span>`;
+  }
+}
+
+function compactMealItems(items = meal.items) {
+  return items.filter(it => Number(it?.qty) > 0).map(it => {
+    const p = resolveMealItemProduct(it);
+    return { productId: p.id || it.productId || null, product: { ...p }, qty: Number(it.qty) };
+  });
 }
 
 function updateEditingBanner() {
@@ -517,65 +545,68 @@ document.getElementById('cancelEditingRecipe')?.addEventListener('click', () => 
   showToast('Prekinuto uređivanje. Spremanje će sada stvoriti novi recept.');
 });
 
-$('#saveRecipe').onclick = async () => {
-  try {
-  const name = $('#mealName').value.trim();
-  if (!name) return alert('Upiši naziv obroka.');
-  if (!meal.items.length) return alert('Dodaj barem jednu namirnicu.');
-  const serv = Math.max(1, Number($('#mealServings').value || 1));
-
-  // 1. Ako se uređuje već otvoreni recept -> ažuriraj postojeći zapis
-  if (meal.recipeId) {
-    const existing = recipes.find(x => x.id === meal.recipeId);
-    if (existing) {
-      existing.name = name;
-      existing.servings = serv;
-      existing.items = structuredClone(meal.items);
-      existing.updatedAt = new Date().toISOString();
-      await dbPut('recipes', existing);
-      recipes = await dbAll('recipes');
-      renderRecipes();
-      updateEditingBanner();
-      showToast(`✓ Recept "${name}" je uspješno ažuriran!`);
-      return;
-    }
-  }
-
-  // 2. Ako nije eksplicitno otvoren recept, provjeri postoji li već recept s istim imenom
-  const sameName = recipes.find(x => norm(x.name) === norm(name));
-  if (sameName) {
-    if (confirm(`Recept s nazivom "${name}" već postoji u bazi.\n\nKlikni [U redu] za AŽURIRANJE postojećeg recepta,\nili [Odustani] ako želiš spremiti kao novu kopiju.`)) {
-      sameName.servings = serv;
-      sameName.items = structuredClone(meal.items);
-      sameName.updatedAt = new Date().toISOString();
-      await dbPut('recipes', sameName);
-      meal.recipeId = sameName.id;
-      recipes = await dbAll('recipes');
-      renderRecipes();
-      updateEditingBanner();
-      showToast(`✓ Recept "${name}" je ažuriran!`);
-      return;
-    }
-  }
-
-  // 3. Inače spremi kao novi recept
-  const r = {
-    id: id(),
+function recipeDraft(nameOverride = null) {
+  const name = (nameOverride ?? $('#mealName').value).trim();
+  if (!name) throw new Error('NAME_REQUIRED');
+  const items = compactMealItems();
+  if (!items.length) throw new Error('ITEMS_REQUIRED');
+  return {
     name,
-    servings: serv,
-    items: structuredClone(meal.items),
+    servings: Math.max(1, Number($('#mealServings').value || 1)),
+    items: structuredClone(items),
     instructions: meal.instructions || '',
-    authorMacros: meal.authorMacros || null,
-    savedAt: new Date().toISOString()
+    authorMacros: meal.authorMacros || null
   };
-  await dbPut('recipes', r);
-  meal.recipeId = r.id;
+}
+
+async function persistRecipe(recipe, { asCurrent = true } = {}) {
+  await dbPut('recipes', recipe);
+  if (asCurrent) {
+    meal.recipeId = recipe.id;
+    meal.name = recipe.name;
+    $('#mealName').value = recipe.name;
+  }
   recipes = await dbAll('recipes');
   renderRecipes();
   updateEditingBanner();
   $('#recipeCount').textContent = `(${recipes.length})`;
-  showToast(`Recept "${name}" je spremljen!`);
+  return recipe;
+}
+
+function nextRecipeCopyName(baseName) {
+  const clean = String(baseName || 'Recept').replace(/\s+\(kopija(?: \d+)?\)$/i, '').trim() || 'Recept';
+  const used = new Set(recipes.map(r => norm(r.name)));
+  if (!used.has(norm(`${clean} (kopija)`))) return `${clean} (kopija)`;
+  let n = 2;
+  while (used.has(norm(`${clean} (kopija ${n})`))) n++;
+  return `${clean} (kopija ${n})`;
+}
+
+$('#saveRecipe').onclick = async () => {
+  try {
+    const draft = recipeDraft();
+    if (meal.recipeId) {
+      const existing = recipes.find(x => x.id === meal.recipeId);
+      if (existing) {
+        await persistRecipe({ ...existing, ...draft, updatedAt: new Date().toISOString() });
+        showToast(`✓ Recept "${draft.name}" je uspješno ažuriran!`);
+        return;
+      }
+    }
+
+    const sameName = recipes.find(x => norm(x.name) === norm(draft.name));
+    if (sameName && confirm(`Recept s nazivom "${draft.name}" već postoji u bazi.\n\nKlikni [U redu] za AŽURIRANJE postojećeg recepta,\nili [Odustani] ako želiš spremiti kao novu kopiju.`)) {
+      await persistRecipe({ ...sameName, ...draft, updatedAt: new Date().toISOString() });
+      showToast(`✓ Recept "${draft.name}" je ažuriran!`);
+      return;
+    }
+
+    const name = sameName ? nextRecipeCopyName(draft.name) : draft.name;
+    await persistRecipe({ id: id(), ...draft, name, savedAt: new Date().toISOString() });
+    showToast(`Recept "${name}" je spremljen!`);
   } catch (err) {
+    if (err?.message === 'NAME_REQUIRED') return alert('Upiši naziv obroka.');
+    if (err?.message === 'ITEMS_REQUIRED') return alert('Dodaj barem jednu namirnicu s količinom većom od 0.');
     console.error('Recipe save error:', err);
     showToast('Spremanje recepta nije uspjelo. Postojeći podaci nisu obrisani.');
   }
@@ -583,45 +614,29 @@ $('#saveRecipe').onclick = async () => {
 
 document.getElementById('saveRecipeCopy')?.addEventListener('click', async () => {
   try {
-  const baseName = $('#mealName').value.trim() || 'Recept';
-  const copyName = baseName.includes('(kopija)') ? baseName : `${baseName} (kopija)`;
-  const serv = Math.max(1, Number($('#mealServings').value || 1));
-  if (!meal.items.length) return alert('Dodaj barem jednu namirnicu.');
-
-  const r = {
-    id: id(),
-    name: copyName,
-    servings: serv,
-    items: structuredClone(meal.items),
-    instructions: meal.instructions || '',
-    authorMacros: meal.authorMacros || null,
-    savedAt: new Date().toISOString()
-  };
-  await dbPut('recipes', r);
-  meal.recipeId = r.id;
-  meal.name = copyName;
-  $('#mealName').value = copyName;
-  recipes = await dbAll('recipes');
-  renderRecipes();
-  updateEditingBanner();
-  $('#recipeCount').textContent = `(${recipes.length})`;
-  showToast(`Spremljeno kao novi recept: "${copyName}"!`);
+    const baseName = $('#mealName').value.trim() || 'Recept';
+    const copyName = nextRecipeCopyName(baseName);
+    const draft = recipeDraft(copyName);
+    await persistRecipe({ id: id(), ...draft, savedAt: new Date().toISOString() });
+    showToast(`Spremljeno kao novi recept: "${copyName}"!`);
   } catch (err) {
+    if (err?.message === 'ITEMS_REQUIRED') return alert('Dodaj barem jednu namirnicu s količinom većom od 0.');
     console.error('Recipe copy save error:', err);
     showToast('Spremanje kopije recepta nije uspjelo.');
   }
 });
 
 $('#addMealToDayPlan').onclick = async () => {
-  if (!meal.items.length) return alert('Obrok nema sastojaka.');
+  const activeItems = compactMealItems();
+  if (!activeItems.length) return alert('Obrok nema sastojaka s količinom većom od 0.');
   const name = $('#mealName').value.trim() || 'Obrok';
-  const divisor = Math.max(1, meal.servings || 1);
-  const blockItems = meal.items.map(it => {
+  const divisor = Math.max(1, Number($('#mealServings').value || meal.servings || 1));
+  const blockItems = activeItems.map(it => {
     const p = resolveMealItemProduct(it);
     return {
       productId: p.id || it.productId || null,
       product: { ...p },
-      qty: (Number(it.qty) || 0) / divisor
+      qty: Number(it.qty) / divisor
     };
   });
   const block = { id: Date.now(), name, items: blockItems };
@@ -639,7 +654,29 @@ $('#addMealToDayPlan').onclick = async () => {
   activateTab('dayplan');
 };
 
+function addProductToMeal(product) {
+  const p = repairProductPackage(product);
+  if (!p) return false;
+  const productId = String(p.id || p.catalogId || '');
+  const barcode = normalizeBarcode(p.barcode);
+  const existing = meal.items.find(it => {
+    const current = resolveMealItemProduct(it);
+    return (productId && (String(current.id) === productId || String(current.catalogId) === productId)) ||
+      (barcode && normalizeBarcode(current.barcode) === barcode);
+  });
+  const defaultQty = p.unit === 'kom' ? 1 : 100;
+  if (existing) {
+    existing.qty = (Number(existing.qty) || 0) + defaultQty;
+  } else {
+    meal.items.push({ productId: p.id || p.catalogId || null, product: { ...p }, qty: defaultQty });
+  }
+  renderMeal();
+  return true;
+}
+
 function renderPicker() {
+  const pickerQuery = norm($('#creatorProductSearch')?.value || '');
+  const matchesPicker = p => !pickerQuery || norm(`${p.name || ''} ${p.brand || ''} ${p.store || ''} ${p.barcode || ''}`).includes(pickerQuery);
   const row = (p, source) => {
     const valBadge = formatUnitValue(p);
     return `
@@ -658,14 +695,14 @@ function renderPicker() {
   };
 
   // Sortiraj favorite po isplativosti po gramu/100g
-  const sortedFavs = [...favorites].sort((a, b) => {
+  const sortedFavs = favorites.filter(matchesPicker).sort((a, b) => {
     const va = getUnitValuePer100(a), vb = getUnitValuePer100(b);
     if (Number.isFinite(va) !== Number.isFinite(vb)) return Number.isFinite(va) ? -1 : 1;
     if (Number.isFinite(va) && va !== vb) return va - vb;
     return (Number(a.price) || 0) - (Number(b.price) || 0);
   });
 
-  const sortedCustom = [...custom].sort((a, b) => {
+  const sortedCustom = custom.filter(matchesPicker).sort((a, b) => {
     const va = getUnitValuePer100(a), vb = getUnitValuePer100(b);
     if (Number.isFinite(va) !== Number.isFinite(vb)) return Number.isFinite(va) ? -1 : 1;
     if (Number.isFinite(va) && va !== vb) return va - vb;
@@ -674,6 +711,11 @@ function renderPicker() {
   
   $('#pickerFavorites').innerHTML = sortedFavs.length ? sortedFavs.map(p => row(p, 'favorites')).join('') : '<div class="empty">Nema favorita. Dodaj ih iz Baze cjenika.</div>';
   $('#pickerCustom').innerHTML = sortedCustom.length ? sortedCustom.map(p => row(p, 'custom')).join('') : '<div class="empty">Nema osobnih proizvoda. Dodaj ih u tabu Moji proizvodi.</div>';
+}
+
+const creatorProductSearch = $('#creatorProductSearch');
+if (creatorProductSearch) {
+  creatorProductSearch.addEventListener('input', () => renderPicker());
 }
 
 // Event Delegation for meals
@@ -690,10 +732,7 @@ document.addEventListener('click', async e => {
   if (b.classList.contains('addMeal')) {
     const arr = (b.dataset.source === 'favorites') ? favorites : custom;
     const p = repairProductPackage(arr.find(x => x.id === b.dataset.id));
-    if (p) {
-      meal.items.push({ product: { ...p }, qty: p.unit === 'kom' ? 1 : 100 });
-      renderMeal();
-    }
+    if (p) addProductToMeal(p);
   }
   if (b.classList.contains('removeMeal')) {
     meal.items.splice(Number(b.dataset.i), 1);
@@ -764,66 +803,41 @@ document.addEventListener('click', async e => {
 });
 
 document.addEventListener('input', e => {
-  if (e.target.classList.contains('mealQty')) {
-    const idx = Number(e.target.dataset.i);
-    const val = Math.max(0, Number(e.target.value || 0));
-    if (meal.items[idx]) {
-      meal.items[idx].qty = val;
-      const row = e.target.closest('.mealIng');
-      if (row) {
-        const p = meal.items[idx].product;
-        const costEl = row.querySelector('.rowCost');
-        if (costEl) costEl.textContent = eur(itemCost(p, val));
-        const macroEl = row.querySelector('.rowMacro');
-        if (macroEl) {
-          if (hasNoMacros(p)) {
-            macroEl.innerHTML = `<span class="quickEditMacro editProduct" data-type="${p.store ? 'favorites' : 'custom'}" data-id="${p.id}" title="Klikni za unos makroa">&#9888;&#65039; 0 kcal &middot; Upiši makrose &#9997;&#65039;</span>`;
-          } else {
-            const f = (p.unit === 'kom' ? val : val / 100);
-            macroEl.innerHTML = `${num((Number(p.kcal)||0)*f, 0)} kcal &middot; P ${num((Number(p.protein)||0)*f)} g &middot; UH ${num((Number(p.carbs)||0)*f)} g &middot; M ${num((Number(p.fat)||0)*f)} g <span class="small" style="opacity:.75">(za ${val} ${p.unit||'g'})</span>`;
-          }
-        }
-      }
-      updateMealTotals();
-    }
-  }
+  if (!e.target.classList.contains('mealQty')) return;
+  const idx = Number(e.target.dataset.i);
+  const item = meal.items[idx];
+  if (!item) return;
+  item.qty = Math.max(0, Number(e.target.value || 0));
+  updateMealIngredientRow(e.target.closest('.mealIng'), item, item.qty);
+  updateMealTotals();
 });
 
 document.addEventListener('click', e => {
   const minusBtn = e.target.closest('.mealQtyMinus');
   const plusBtn = e.target.closest('.mealQtyPlus');
-  if (minusBtn || plusBtn) {
-    const btn = minusBtn || plusBtn;
-    const idx = Number(btn.dataset.i);
-    if (meal.items[idx]) {
-      const step = (meal.items[idx].product.unit === 'kom') ? 1 : 5;
-      if (minusBtn) meal.items[idx].qty = Math.max(0, (Number(meal.items[idx].qty) || 0) - step);
-      else meal.items[idx].qty = (Number(meal.items[idx].qty) || 0) + step;
-      
-      const row = btn.closest('.mealIng');
-      if (row) {
-        const val = meal.items[idx].qty;
-        const p = meal.items[idx].product;
-        const inp = row.querySelector('.mealQty');
-        if (inp) inp.value = val;
-        const costEl = row.querySelector('.rowCost');
-        if (costEl) costEl.textContent = eur(itemCost(p, val));
-        const macroEl = row.querySelector('.rowMacro');
-        if (macroEl) {
-          if (hasNoMacros(p)) {
-            macroEl.innerHTML = `<span class="quickEditMacro editProduct" data-type="${p.store ? 'favorites' : 'custom'}" data-id="${p.id}" title="Klikni za unos makroa">&#9888;&#65039; 0 kcal &middot; Upiši makrose &#9997;&#65039;</span>`;
-          } else {
-            const f = (p.unit === 'kom' ? val : val / 100);
-            macroEl.innerHTML = `${num((Number(p.kcal)||0)*f, 0)} kcal &middot; P ${num((Number(p.protein)||0)*f)} g &middot; UH ${num((Number(p.carbs)||0)*f)} g &middot; M ${num((Number(p.fat)||0)*f)} g <span class="small" style="opacity:.75">(za ${val} ${p.unit||'g'})</span>`;
-          }
-        }
-      }
-      updateMealTotals();
-    }
-  }
+  if (!minusBtn && !plusBtn) return;
+  const btn = minusBtn || plusBtn;
+  const idx = Number(btn.dataset.i);
+  const item = meal.items[idx];
+  if (!item) return;
+  const p = resolveMealItemProduct(item);
+  const step = p.unit === 'kom' ? 1 : 5;
+  item.qty = Math.max(0, (Number(item.qty) || 0) + (minusBtn ? -step : step));
+  updateMealIngredientRow(btn.closest('.mealIng'), item, item.qty);
+  updateMealTotals();
 });
 $('#mealName').oninput = e => meal.name = e.target.value;
-$('#mealServings').oninput = e => { meal.servings = Math.max(1, Number(e.target.value || 1)); updateMealTotals(); };
+$('#mealServings').oninput = e => {
+  const raw = Number(e.target.value);
+  meal.servings = Number.isFinite(raw) && raw > 0 ? raw : 1;
+  updateMealTotals();
+};
+$('#mealServings').onchange = e => {
+  const value = Math.max(1, Math.round(Number(e.target.value) || 1));
+  meal.servings = value;
+  e.target.value = value;
+  updateMealTotals();
+};
 
 // === CATALOG SEARCH & AUTO-ENRICHMENT ===
 async function searchCatalog(inp, out) {
@@ -1041,9 +1055,8 @@ async function refreshFavoritesFromCatalog({ silent = true } = {}) {
 async function addCatalogToMeal(cid) {
   const f = await favoriteFromCatalog(cid);
   if (!f) return;
-  meal.items.push({ product: { ...f }, qty: f.unit === 'kom' ? 1 : 100 });
+  addProductToMeal(f);
   activateTab('creator');
-  renderMeal();
 }
 
 // === FAVORITI & MOJI PROIZVODI ===
@@ -1379,10 +1392,10 @@ function renderRecipes() {
 function loadRecipe(rid) {
   const r = recipes.find(x => x.id === rid);
   if (!r) return;
-  const resolvedItems = (r.items || []).map(it => ({
-    ...it,
-    product: resolveMealItemProduct(it)
-  }));
+  const resolvedItems = (r.items || []).filter(it => Number(it?.qty) > 0).map(it => {
+    const product = resolveMealItemProduct(it);
+    return { ...it, productId: product.id || it.productId || null, product };
+  });
   meal = {
     recipeId: r.id,
     name: r.name,
