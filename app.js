@@ -1034,6 +1034,8 @@ function formatUnitValue(p) {
 function productCard(p, type) {
   const unitBadge = formatUnitValue(p);
   const saleBadge = p.onSale ? '<span class="saleBadgeMini">🔥 AKCIJA</span>' : '';
+  const unavailableBadge = type === 'favorites' && p.catalogAvailable === false
+    ? '<span class="saleBadgeMini">NEMA U AKTUALNOM KATALOGU</span>' : '';
   const offers = (Array.isArray(p.offers) && p.offers.length > 1) ? p.offers : null;
 
   let offersHtml = '';
@@ -1055,7 +1057,7 @@ function productCard(p, type) {
   return `
   <div class="item favCard">
     <div>
-      <div class="name" style="font-size:15px">${esc(p.name)} ${saleBadge}</div>
+      <div class="name" style="font-size:15px">${esc(p.name)} ${saleBadge} ${unavailableBadge}</div>
       <div class="meta" style="font-size:13px">
         ${esc(p.brand || '')} · <b>${num(p.pack, 0)} ${esc(p.unit)}</b> · 
         Najniža cijena: <b style="color:var(--accent);font-size:15px">${eur(p.price)}</b> (${esc(p.store || '')})
