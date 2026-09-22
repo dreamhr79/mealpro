@@ -1,4 +1,4 @@
-const DB_NAME='cijeneMealProDB',DB_VER=5;
+const DB_NAME='cijeneMealProDB',DB_VER=6;
 let _db;
 function openDB(){
  if(_db)return Promise.resolve(_db);
@@ -14,6 +14,10 @@ function openDB(){
    if(!d.objectStoreNames.contains('meta'))d.createObjectStore('meta',{keyPath:'key'});
    if(!d.objectStoreNames.contains('nutritionOverlay'))d.createObjectStore('nutritionOverlay',{keyPath:'key'});
    if(!d.objectStoreNames.contains('priceHistory'))d.createObjectStore('priceHistory',{keyPath:'id',autoIncrement:true});
+   if(!d.objectStoreNames.contains('recipePriceHistory')){
+    const history=d.createObjectStore('recipePriceHistory',{keyPath:'id',autoIncrement:true});
+    history.createIndex('recipeId','recipeId',{unique:false});
+   }
    if(!d.objectStoreNames.contains('products')){
     const products=d.createObjectStore('products',{keyPath:'id'});
     products.createIndex('barcode','barcode',{unique:false});
