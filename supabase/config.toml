@@ -1,0 +1,4 @@
+project_id = ""
+
+[functions.catalog-sync]
+verify_jwt = true
