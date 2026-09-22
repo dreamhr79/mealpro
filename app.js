@@ -1382,10 +1382,10 @@ function renderRecipes() {
 function loadRecipe(rid) {
   const r = recipes.find(x => x.id === rid);
   if (!r) return;
-  const resolvedItems = (r.items || []).map(it => ({
-    ...it,
-    product: resolveMealItemProduct(it)
-  }));
+  const resolvedItems = (r.items || []).filter(it => Number(it?.qty) > 0).map(it => {
+    const product = resolveMealItemProduct(it);
+    return { ...it, productId: product.id || it.productId || null, product };
+  });
   meal = {
     recipeId: r.id,
     name: r.name,
