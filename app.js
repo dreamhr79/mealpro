@@ -106,6 +106,31 @@ function favoriteOfferSnapshot(rows) {
   return sortOffersByPrice(rows).map(offerFromCatalogRow);
 }
 
+function applyCatalogStateToFavorite(favorite, product, offers) {
+  const sorted = sortOffersByPrice(offers || []);
+  const best = sorted[0];
+  if (!best) return { ...favorite, catalogAvailable: false, offers: [], onSale: false };
+
+  // Catalog owns commercial metadata; the user owns macros/category and other
+  // personal enrichment already stored on the favorite.
+  return {
+    ...favorite,
+    catalogId: best.id,
+    barcode: product?.barcode || favorite.barcode || '',
+    name: product?.name || favorite.name,
+    brand: product?.brand || favorite.brand || '',
+    price: best.price,
+    store: best.store,
+    pack: product?.pack || best.pack || favorite.pack,
+    unit: product?.unit || best.unit || favorite.unit,
+    pricePer100: best.pricePer100,
+    onSale: best.onSale,
+    offers: favoriteOfferSnapshot(sorted),
+    catalogAvailable: true,
+    catalogUpdatedAt: new Date().toISOString()
+  };
+}
+
 function canonicalProductFromCatalogRow(row) {
   const productKey = canonicalProductKey(row);
   return {
