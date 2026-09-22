@@ -608,7 +608,7 @@ $('#addMealToDayPlan').onclick = async () => {
   }
   renderDayPlan();
   showToast(`Obrok "${name}" je dodan u Dnevni plan!`);
-  $('#tabs button[data-tab="dayplan"]').click();
+  activateTab('dayplan');
 };
 
 function renderPicker() {
@@ -1332,7 +1332,7 @@ function loadRecipe(rid) {
   $('#mealName').value = r.name;
   $('#mealServings').value = r.servings || 1;
   updateEditingBanner();
-  $('#tabs button[data-tab="creator"]').click();
+  activateTab('creator');
   renderMeal();
   showToast(`Otvoren recept: "${r.name}". Promjene će ga ažurirati.`);
 }
@@ -2372,7 +2372,7 @@ $('#igSaveBtn').onclick = async () => {
     renderRecipes();
     $('#recipeCount').textContent = `(${recipes.length})`;
     showToast(`Recept "${title}" je uspješno spremljen s uputama i makrosima!`);
-    $('#tabs button[data-tab="recipes"]').click();
+    activateTab('recipes');
   } catch (err) {
     console.error('Instagram recipe save error:', err);
     showToast('Spremanje uvezenog recepta nije uspjelo.');
@@ -2392,7 +2392,7 @@ $('#igOpenInCreatorBtn').onclick = async () => {
   updateEditingBanner();
   renderMeal();
   showToast('Recept je otvoren u Kreatoru obroka!');
-  $('#tabs button[data-tab="creator"]').click();
+  activateTab('creator');
 };
 
 // === BACKUP (IMPORT / EXPORT JSON) ===
