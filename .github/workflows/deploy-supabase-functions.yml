@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'supabase/functions/**'
+      - 'supabase/migrations/**'
       - 'supabase/config.toml'
       - '.github/workflows/deploy-supabase-functions.yml'
   workflow_dispatch:
@@ -30,5 +31,12 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.45.5
+      - name: Apply database migrations
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          test -n "$SUPABASE_DB_PASSWORD"
+          supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+          supabase db push --include-all
       - name: Deploy catalog-sync
         run: supabase functions deploy catalog-sync --use-api --project-ref "$SUPABASE_PROJECT_ID"
