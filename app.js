@@ -260,7 +260,10 @@ function updateMealTotals() {
   meal.servings = Math.max(1, Number($('#mealServings')?.value || meal.servings || 1));
   let t = { kcal: 0, protein: 0, carbs: 0, fat: 0, cost: 0 };
   for (const it of meal.items) {
-    const p = it.product, q = it.qty, f = (p.unit === 'kom' ? q : q / 100);
+    const p = resolveMealItemProduct(it);
+    it.product = p;
+    const q = Number(it.qty) || 0;
+    const f = (p.unit === 'kom' ? q : q / 100);
     t.kcal += Number(p.kcal || 0) * f;
     t.protein += Number(p.protein || 0) * f;
     t.carbs += Number(p.carbs || 0) * f;
@@ -2064,7 +2067,12 @@ $('#backupFileInput').onchange = async e => {
 };
 
 // Initial Start
-loadAll().catch(e => console.error('Start error:', e));
+loadAll().catch(e => {
+  console.error('Start error:', e);
+  const syncState = $('#syncState');
+  if (syncState) syncState.textContent = 'Greška pri učitavanju lokalnih podataka. Osvježi aplikaciju i pokušaj ponovno.';
+  showToast('MealPro nije uspio učitati sve lokalne podatke.');
+});
 
 
 let manualZipBuffer = null;
