@@ -99,22 +99,19 @@ async function dbSearchProducts(q,limit=80){
 async function dbSearchProductsWithOffers(q,limit=80){
  const products=await dbSearchProducts(q,limit);
  if(!products.length)return [];
- const keys=new Set(products.map(p=>p.id));
  const d=await openDB();
  const grouped=new Map();
  await new Promise((res,rej)=>{
-  const req=d.transaction('offers').objectStore('offers').openCursor();
-  req.onsuccess=()=>{
-   const cur=req.result;
-   if(!cur){res();return;}
-   const offer=cur.value;
-   if(keys.has(offer.productKey)){
-    if(!grouped.has(offer.productKey))grouped.set(offer.productKey,[]);
-    grouped.get(offer.productKey).push(offer);
-   }
-   cur.continue();
-  };
-  req.onerror=()=>rej(req.error||Error('Dohvat aktualnih ponuda nije uspio.'));
+  const tx=d.transaction('offers','readonly');
+  const index=tx.objectStore('offers').index('productKey');
+  for(const product of products){
+   const req=index.getAll(IDBKeyRange.only(product.id));
+   req.onsuccess=()=>grouped.set(product.id,req.result||[]);
+   req.onerror=()=>tx.abort();
+  }
+  tx.oncomplete=()=>res();
+  tx.onerror=()=>rej(tx.error||Error('Dohvat aktualnih ponuda nije uspio.'));
+  tx.onabort=()=>rej(tx.error||Error('Dohvat aktualnih ponuda je prekinut.'));
  });
  return products.map(product=>({product,offers:grouped.get(product.id)||[]})).filter(x=>x.offers.length);
 }
