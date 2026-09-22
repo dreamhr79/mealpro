@@ -882,7 +882,7 @@ async function favoriteFromCatalog(cid) {
   return newFav;
 }
 
-async function addCatalogToMeal(cid) {
+async async function addCatalogToMeal(cid) {
   const f = await favoriteFromCatalog(cid);
   if (!f) return;
   meal.items.push({ product: { ...f }, qty: f.unit === 'kom' ? 1 : 100 });
@@ -1650,7 +1650,10 @@ $('#copyShopList').onclick = () => {
 
   navigator.clipboard.writeText(text).then(() => {
     showToast('Popis za kupovinu je kopiran u međuspremnik!');
-  }).catch(() => alert('Kopiranje nije uspjelo. Označi ručno.'));
+  }).catch(err => {
+    console.error('Shopping list clipboard error:', err);
+    showToast('Kopiranje popisa nije uspjelo.');
+  });
 };
 
 // === SINKRONIZACIJA CIJENE.DEV ===
