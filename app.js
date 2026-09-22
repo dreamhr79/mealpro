@@ -804,7 +804,7 @@ async function searchCatalog(inp, out) {
       return (Number(a.price) || 0) - (Number(b.price) || 0);
     });
     const best = items[0];
-    groupedProducts.push({ best, offers: items });
+    groupedProducts.push({ best, offers: items, productKey: key });
   }
 
   groupedProducts.sort((a, b) => {
@@ -831,7 +831,7 @@ async function searchCatalog(inp, out) {
     });
   }
 
-  out.innerHTML = groupedProducts.length ? groupedProducts.map(({ best: p, offers }) => {
+  out.innerHTML = groupedProducts.length ? groupedProducts.map(({ best: p, offers, productKey }) => {
     const isFav = isProductInFavorites(p, offers);
     const unitVal = formatUnitValue(p);
     const multiStore = (offers.length > 1) ? ` <span class="pill" style="font-size:11px">${offers.length} trgovine</span>` : '';
@@ -854,10 +854,10 @@ async function searchCatalog(inp, out) {
       </div>
       <div class="meta">${p.pricePer100 ? eur(p.pricePer100) + ' / 100' : ''}</div>
       <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
-        <button class="favFromCatalog ${isFav ? 'isFavoriteBtn' : ''}" data-id="${esc(p.id)}" title="${isFav ? 'Već je u favoritima (klikni za ažuriranje ponuda)' : 'Dodaj u favorite'}">
+        <button class="favFromCatalog ${isFav ? 'isFavoriteBtn' : ''}" data-id="${esc(productKey)}" title="${isFav ? 'Već je u favoritima (klikni za ažuriranje ponuda)' : 'Dodaj u favorite'}">
           ${isFav ? '★ U favoritima' : '☆ U favorite'}
         </button>
-        <button class="secondary baseToMeal" data-id="${esc(p.id)}">+ Obrok</button>
+        <button class="secondary baseToMeal" data-id="${esc(productKey)}">+ Obrok</button>
       </div>
     </div>`;
   }).join('') : '<div class="empty">Nema rezultata za traženi pojam.</div>';
@@ -868,42 +868,29 @@ $('#catalogSearch').onkeydown = e => { if (e.key === 'Enter') searchCatalog(e.ta
 $('#creatorCatalogBtn').onclick = () => searchCatalog($('#creatorCatalogSearch'), $('#creatorCatalogResults'));
 $('#creatorCatalogSearch').onkeydown = e => { if (e.key === 'Enter') searchCatalog(e.target, $('#creatorCatalogResults')); };
 
-async function favoriteFromCatalog(cid) {
-  const p = await dbGet('catalog', cid);
-  if (!p) return;
-
-  // Prefer the normalized Product -> current Offers model. Keep the legacy
-  // catalog lookup only as a compatibility fallback during Phase 2 migration.
-  const productKey = canonicalProductKey(p);
+async function favoriteFromCatalog(productKey) {
   const normalized = await dbGetProductWithOffers(productKey);
-  let allOffers = normalized?.offers?.length ? normalized.offers : [p];
+  if (!normalized?.product || !normalized.offers?.length) return;
 
-  // Isti EAN predstavlja isti fizički proizvod/pakiranje, pa je za favorita
-  // relevantna najniža cijena pakiranja. €/100 g ostaje informativna metrika
-  // za usporedbu različitih proizvoda i veličina pakiranja.
-  allOffers = sortOffersByPrice(allOffers);
-
+  const p = normalized.product;
+  const allOffers = sortOffersByPrice(normalized.offers);
   const bestOffer = allOffers[0];
 
-  // Provjera postoji li već favorit s istim barkodom ili istim ID-om
-  const existingFav = favorites.find(f => 
+  const existingFav = favorites.find(f =>
+    f.id === productKey ||
     (normalizeBarcode(p.barcode) && normalizeBarcode(f.barcode) === normalizeBarcode(p.barcode)) ||
-    f.catalogId === p.id ||
-    f.id === (p.barcode ? `ean:${p.barcode}` : `base:${p.id}`)
+    f.catalogId === bestOffer.id
   );
 
   if (existingFav) {
-    // Spriječi dupliciranje i ažuriraj ponude trgovina i najnižu cijenu.
-    // Sačuvaj ručno unesene makrose/kategoriju, ali propagiraj novu cijenu
-    // kroz postojeće recepte i dnevni plan.
     existingFav.catalogId = bestOffer.id;
-    existingFav.name = normalized?.product?.name || p.name || existingFav.name;
-    existingFav.brand = normalized?.product?.brand || p.brand || existingFav.brand || '';
-    existingFav.barcode = normalized?.product?.barcode || p.barcode || existingFav.barcode || '';
+    existingFav.name = p.name || existingFav.name;
+    existingFav.brand = p.brand || existingFav.brand || '';
+    existingFav.barcode = p.barcode || existingFav.barcode || '';
     existingFav.price = bestOffer.price;
     existingFav.store = bestOffer.store;
-    existingFav.pack = bestOffer.pack;
-    existingFav.unit = bestOffer.unit;
+    existingFav.pack = p.pack || bestOffer.pack;
+    existingFav.unit = p.unit || bestOffer.unit;
     existingFav.pricePer100 = bestOffer.pricePer100;
     existingFav.onSale = bestOffer.onSale;
     existingFav.offers = favoriteOfferSnapshot(allOffers);
@@ -914,15 +901,14 @@ async function favoriteFromCatalog(cid) {
     return existingFav;
   }
 
-  const fid = canonicalProductKey(p);
   const newFav = {
-    id: fid,
+    id: productKey,
     catalogId: bestOffer.id,
-    barcode: normalized?.product?.barcode || p.barcode || '',
-    name: normalized?.product?.name || p.name || '',
-    brand: normalized?.product?.brand || p.brand || '',
-    pack: normalized?.product?.pack || bestOffer.pack,
-    unit: normalized?.product?.unit || bestOffer.unit,
+    barcode: p.barcode || '',
+    name: p.name || '',
+    brand: p.brand || '',
+    pack: p.pack || bestOffer.pack,
+    unit: p.unit || bestOffer.unit,
     price: bestOffer.price,
     store: bestOffer.store,
     pricePer100: bestOffer.pricePer100,
@@ -932,7 +918,6 @@ async function favoriteFromCatalog(cid) {
     addedAt: new Date().toISOString()
   };
 
-  // Automatski povuci makrose ako postoji barkod
   if (p.barcode) {
     showToast('Dohvaćam nutritivne podatke preko Open Food Facts…');
     const off = await fetchOffMacros(p.barcode);
@@ -950,7 +935,6 @@ async function favoriteFromCatalog(cid) {
   showToast(`${newFav.name} je dodan u Favorite (najniža cijena: ${eur(newFav.price)} u ${newFav.store}).`);
   return newFav;
 }
-
 async function addCatalogToMeal(cid) {
   const f = await favoriteFromCatalog(cid);
   if (!f) return;
