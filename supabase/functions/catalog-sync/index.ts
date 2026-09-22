@@ -87,6 +87,12 @@ Deno.serve(async (req) => {
   let syncId: number | undefined;
   const requestBody = await req.json().catch(() => ({}));
   try {
+    // A hard runtime kill cannot execute catch/finally. Mark abandoned attempts
+    // from previous invocations before starting a fresh sync.
+    await supabase("catalog_syncs?status=eq.running&finished_at=is.null", {
+      method:"PATCH",
+      body:JSON.stringify({status:"failed",finished_at:new Date().toISOString(),missing_chains:["Previous sync was interrupted before completion"]})
+    });
     const listRes = await fetch("https://api.cijene.dev/v0/list");
     if (!listRes.ok) throw new Error(`cijene.dev list failed: ${listRes.status}`);
     const list = await listRes.json();
