@@ -198,7 +198,7 @@ async function fetchOffMacros(barcode) {
 }
 
 // === Loading State ===
-async function loadAll() {
+async async function loadAll() {
   favorites = (await dbAll('favorites')).map(repairProductPackage);
   custom = (await dbAll('custom')).map(repairProductPackage);
   recipes = (await dbAll('recipes')).map(r => {
@@ -784,7 +784,7 @@ $('#catalogSearch').onkeydown = e => { if (e.key === 'Enter') searchCatalog(e.ta
 $('#creatorCatalogBtn').onclick = () => searchCatalog($('#creatorCatalogSearch'), $('#creatorCatalogResults'));
 $('#creatorCatalogSearch').onkeydown = e => { if (e.key === 'Enter') searchCatalog(e.target, $('#creatorCatalogResults')); };
 
-async function favoriteFromCatalog(cid) {
+async async function favoriteFromCatalog(cid) {
   const p = await dbGet('catalog', cid);
   if (!p) return;
 
