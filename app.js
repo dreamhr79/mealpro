@@ -2122,16 +2122,28 @@ $('#backupFileInput').onchange = async e => {
   if (!f) return;
   try {
     const data = JSON.parse(await f.text());
-    if (!data.favorites || !data.recipes) throw Error('Neispravan format backup datoteke.');
+    if (!data || !Array.isArray(data.favorites) || !Array.isArray(data.recipes) || (data.custom != null && !Array.isArray(data.custom))) {
+      throw Error('Neispravan format backup datoteke.');
+    }
+    const validRecord = x => x && typeof x === 'object' && !Array.isArray(x) && x.id != null;
+    if (!data.favorites.every(validRecord) || !(data.custom || []).every(validRecord) || !data.recipes.every(validRecord)) {
+      throw Error('Backup sadrži neispravne zapise.');
+    }
     if (!confirm(`Učitavanjem backupa zamijenit će se osobni favoriti (${data.favorites.length}) i recepti (${data.recipes.length}). Nastaviti?`)) return;
+
+    // Validate the full payload before destructive clears. A malformed backup must
+    // never erase working local data before we discover the problem.
+    const incomingFavorites = structuredClone(data.favorites);
+    const incomingCustom = structuredClone(data.custom || []);
+    const incomingRecipes = structuredClone(data.recipes);
 
     await dbClear('favorites');
     await dbClear('custom');
     await dbClear('recipes');
 
-    for (const item of data.favorites) await dbPut('favorites', item);
-    for (const item of data.custom || []) await dbPut('custom', item);
-    for (const item of data.recipes) await dbPut('recipes', item);
+    for (const item of incomingFavorites) await dbPut('favorites', item);
+    for (const item of incomingCustom) await dbPut('custom', item);
+    for (const item of incomingRecipes) await dbPut('recipes', item);
     if (data.dayPlan) {
       dayPlan = data.dayPlan;
       await saveDayPlan();
