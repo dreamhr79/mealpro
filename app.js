@@ -1880,7 +1880,9 @@ $('#syncStart').onclick = async () => {
     }
 
     if (!all.length) throw Error('U odabranim lancima nisu pronađeni valjani artikli. Postojeća baza nije promijenjena.');
-    if (missingChains.length) log(`Upozorenje: ZIP nema potpune CSV podatke za: ${missingChains.join(', ')}. Ti lanci nisu ažurirani.`);
+    if (missingChains.length) {
+      throw Error(`Sinkronizacija je prekinuta jer ZIP nema potpune CSV podatke za: ${missingChains.join(', ')}. Postojeća baza nije promijenjena.`);
+    }
     // Build the normalized model directly. We no longer persist the raw
     // per-store catalog, avoiding a duplicate copy of the same cijene.dev data.
     const normalized = buildNormalizedCatalogModel(all);
@@ -1944,7 +1946,7 @@ $('#syncStart').onclick = async () => {
       if (manualInput) manualInput.value = '';
       log('Ručni ZIP je potrošen i uklonjen iz memorije.');
     }
-    showToast(missingChains.length ? 'Baza je ažurirana, ali dio odabranih lanaca nije bio dostupan u ZIP-u.' : 'Baza cijena je uspješno ažurirana!');
+    showToast('Baza cijena je uspješno ažurirana!');
     setTimeout(() => $('#syncDialog').close(), 1200);
   } catch (err) {
     console.error(err);
