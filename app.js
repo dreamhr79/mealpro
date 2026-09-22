@@ -87,6 +87,31 @@ function favoriteOfferSnapshot(rows) {
   return sortOffersByPrice(rows).map(offerFromCatalogRow);
 }
 
+function canonicalProductFromCatalogRow(row) {
+  const productKey = canonicalProductKey(row);
+  return {
+    id: productKey,
+    barcode: normalizeBarcode(row.barcode),
+    name: row.name || '',
+    brand: row.brand || '',
+    pack: Number(row.pack) || 0,
+    unit: row.unit || 'kom',
+    search: row.search || norm(`${row.name || ''} ${row.brand || ''} ${normalizeBarcode(row.barcode)}`),
+    tokens: Array.isArray(row.tokens) ? row.tokens : tokens(row.search || row.name || '')
+  };
+}
+
+function buildNormalizedCatalogModel(rows) {
+  const products = new Map();
+  const offers = [];
+  for (const row of rows || []) {
+    const product = canonicalProductFromCatalogRow(row);
+    if (!products.has(product.id)) products.set(product.id, product);
+    offers.push(offerFromCatalogRow(row));
+  }
+  return { products: [...products.values()], offers };
+}
+
 function packFromName(name) {
   const s = String(name || '').toLowerCase().replace(/,/g, '.').replace(/\s+/g, ' ').trim();
   if (!s) return null;
@@ -1817,6 +1842,13 @@ $('#syncStart').onclick = async () => {
     // fails, the previous working catalog remains intact.
     await dbReplaceStore('catalog', all, (n, t) => log(`Spremanje: ${n.toLocaleString('hr-HR')} / ${t.toLocaleString('hr-HR')}`));
 
+    // Normalized model: one canonical product, current offers only, and a
+    // compact price history row only when an offer price/sale state changes.
+    const normalized = buildNormalizedCatalogModel(all);
+    const syncStamp = new Date().toISOString();
+    const modelStats = await dbSyncCatalogModel(normalized.products, normalized.offers, syncStamp);
+    log(`Model: ${modelStats.products.toLocaleString('hr-HR')} proizvoda · ${modelStats.offers.toLocaleString('hr-HR')} aktualnih ponuda · ${modelStats.priceChanges.toLocaleString('hr-HR')} promjena cijene`);
+
     // Osvježi cijene postojećih favorita. EAN je kanonski identitet proizvoda:
     // isti fizički proizvod iz više trgovina ostaje jedan favorit s više ponuda.
     const byId = new Map(all.map(p => [p.id, p]));
@@ -1856,7 +1888,7 @@ $('#syncStart').onclick = async () => {
       await propagateProductUpdate(f);
     }
 
-    await dbPut('meta', { key: 'sync', date: latest.date, count: all.length, syncedAt: new Date().toISOString() });
+    await dbPut('meta', { key: 'sync', date: latest.date, count: all.length, products: modelStats.products, offers: modelStats.offers, priceChanges: modelStats.priceChanges, syncedAt: syncStamp });
     await loadAll();
     log(`Gotovo! Baza sadrži ${all.length.toLocaleString('hr-HR')} ažuriranih artikala.`);
     showToast('Baza cijena je uspješno ažurirana!');
