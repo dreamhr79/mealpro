@@ -911,6 +911,17 @@ $('#catalogSearch').onkeydown = e => { if (e.key === 'Enter') searchCatalog(e.ta
 $('#creatorCatalogBtn').onclick = () => searchCatalog($('#creatorCatalogSearch'), $('#creatorCatalogResults'));
 $('#creatorCatalogSearch').onkeydown = e => { if (e.key === 'Enter') searchCatalog(e.target, $('#creatorCatalogResults')); };
 
+function findFavoriteForCatalog(product, offers = [], productKey = '') {
+  const code = normalizeBarcode(product?.barcode);
+  const offerIds = new Set((offers || []).map(o => o.id));
+  return favorites.find(f => {
+    if (productKey && f.id === productKey) return true;
+    if (code && normalizeBarcode(f.barcode) === code) return true;
+    if (f.catalogId && offerIds.has(f.catalogId)) return true;
+    return Array.isArray(f.offers) && f.offers.some(o => offerIds.has(o.id));
+  });
+}
+
 async function favoriteFromCatalog(productKey) {
   const normalized = await CatalogRepository.getProduct(productKey);
   if (!normalized?.product || !normalized.offers?.length) return;
@@ -919,11 +930,7 @@ async function favoriteFromCatalog(productKey) {
   const allOffers = sortOffersByPrice(normalized.offers);
   const bestOffer = allOffers[0];
 
-  const existingFav = favorites.find(f =>
-    f.id === productKey ||
-    (normalizeBarcode(p.barcode) && normalizeBarcode(f.barcode) === normalizeBarcode(p.barcode)) ||
-    f.catalogId === bestOffer.id
-  );
+  const existingFav = findFavoriteForCatalog(p, allOffers, productKey);
 
   if (existingFav) {
     existingFav.catalogId = bestOffer.id;
