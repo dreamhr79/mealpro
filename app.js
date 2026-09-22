@@ -373,6 +373,7 @@ async function loadAll() {
     }
   }
 
+  await refreshRecipePriceHistory();
   renderFavorites();
   renderCustom();
   renderRecipes();
@@ -1345,6 +1346,70 @@ function recipeLiveState(recipe) {
   return { items, servings, totals };
 }
 
+let recipePriceHistory = new Map();
+
+function recipePriceSnapshot(recipe, live = recipeLiveState(recipe)) {
+  return {
+    recipeId: recipe.id,
+    price: Number(live.totals.cost.toFixed(4)),
+    ingredientPrices: live.items.map(it => ({
+      productId: it.productId || it.product?.id || null,
+      name: it.product?.name || '',
+      qty: Number(it.qty) || 0,
+      cost: Number(itemCost(it.product, it.qty).toFixed(4))
+    })),
+    recordedAt: new Date().toISOString()
+  };
+}
+
+async function trackRecipePrice(recipe, live = recipeLiveState(recipe)) {
+  if (!recipe?.id || !live.items.length) return false;
+  const current = recipePriceSnapshot(recipe, live);
+  const history = recipePriceHistory.get(recipe.id) || [];
+  const previous = history[history.length - 1];
+  if (previous && Math.abs(Number(previous.price) - current.price) < 0.0001) return false;
+  await dbPut('recipePriceHistory', current);
+  history.push(current);
+  while (history.length > 30) {
+    const removed = history.shift();
+    if (removed?.id != null) await dbDelete('recipePriceHistory', removed.id);
+  }
+  recipePriceHistory.set(recipe.id, history);
+  return true;
+}
+
+function recipePriceTrend(recipeId, currentPrice) {
+  const history = recipePriceHistory.get(recipeId) || [];
+  if (!history.length) return '';
+  const previous = history.length > 1 ? history[history.length - 2] : history[0];
+  const baseline = Number(previous?.price) || 0;
+  const current = Number(currentPrice) || 0;
+  if (!(baseline > 0) || Math.abs(current - baseline) < 0.005) return '<span class="recipeTrend flat">bez promjene</span>';
+  const delta = current - baseline;
+  const pct = delta / baseline * 100;
+  const direction = delta > 0 ? '↑' : '↓';
+  const cls = delta > 0 ? 'up' : 'down';
+  return `<span class="recipeTrend ${cls}">${direction} ${eur(Math.abs(delta))} (${num(Math.abs(pct))}%)</span>`;
+}
+
+function recipePriceRange(recipeId, currentPrice) {
+  const history = recipePriceHistory.get(recipeId) || [];
+  const prices = [...history.map(x => Number(x.price) || 0), Number(currentPrice) || 0].filter(x => x > 0);
+  if (!prices.length) return '';
+  return `min ${eur(Math.min(...prices))} · max ${eur(Math.max(...prices))}`;
+}
+
+async function refreshRecipePriceHistory() {
+  const rows = await dbAll('recipePriceHistory');
+  recipePriceHistory = new Map();
+  for (const row of rows) {
+    if (!recipePriceHistory.has(row.recipeId)) recipePriceHistory.set(row.recipeId, []);
+    recipePriceHistory.get(row.recipeId).push(row);
+  }
+  for (const history of recipePriceHistory.values()) history.sort((a, b) => String(a.recordedAt).localeCompare(String(b.recordedAt)));
+  for (const recipe of recipes) await trackRecipePrice(recipe);
+}
+
 function renderRecipes() {
   const query = norm($('#recipeSearch')?.value || '');
   const sortMode = $('#recipeSort')?.value || 'newest';
@@ -1391,6 +1456,7 @@ function renderRecipes() {
         <div>
           <div class="name" style="font-size:16px">${esc(r.name)}</div>
           <div class="meta">${servings} porcija · ${items.length} sastojaka · <b>${eur(cost)}</b> (${eur(cost / servings)} / porciji)</div>
+          <div class="recipePriceMeta">${recipePriceTrend(r.id, cost)} <span>${recipePriceRange(r.id, cost)}</span></div>
           <div class="macro" style="margin-top:2px">${calcMacroHtml}</div>
           ${authorMacroHtml}
         </div>
