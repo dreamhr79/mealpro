@@ -1851,7 +1851,9 @@ $('#syncStart').onclick = async () => {
     const normalized = buildNormalizedCatalogModel(all);
     const syncStamp = new Date().toISOString();
     const modelStats = await dbSyncCatalogModel(normalized.products, normalized.offers, syncStamp);
+    const prunedHistory = await dbPrunePriceHistory(30);
     log(`Model: ${modelStats.products.toLocaleString('hr-HR')} proizvoda · ${modelStats.offers.toLocaleString('hr-HR')} aktualnih ponuda · ${modelStats.priceChanges.toLocaleString('hr-HR')} promjena cijene`);
+    if (prunedHistory) log(`Povijest cijena: uklonjeno ${prunedHistory.toLocaleString('hr-HR')} zastarjelih zapisa (zadržano najviše 30 promjena po ponudi).`);
 
     // Osvježi cijene postojećih favorita. EAN je kanonski identitet proizvoda:
     // isti fizički proizvod iz više trgovina ostaje jedan favorit s više ponuda.
