@@ -1280,10 +1280,19 @@ document.addEventListener('change', async e => {
   }
 });
 
-document.addEventListener('input', async e => {
+document.addEventListener('input', e => {
   if (e.target.classList.contains('dayQtyInput')) {
     const bi = Number(e.target.dataset.bi), ii = Number(e.target.dataset.ii);
-    dayPlan.blocks[bi].items[ii].qty = Math.max(0, Number(e.target.value || 0));
+    const item = dayPlan.blocks?.[bi]?.items?.[ii];
+    if (!item) return;
+    item.qty = Math.max(0, Number(e.target.value || 0));
+    // Do not rebuild the whole day plan while the user is typing: replacing the
+    // input element steals focus and made multi-digit quantities feel "blocked".
+  }
+});
+
+document.addEventListener('change', async e => {
+  if (e.target.classList.contains('dayQtyInput')) {
     await saveDayPlan();
     renderDayPlan();
   }
