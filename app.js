@@ -800,6 +800,7 @@ document.addEventListener('click', async e => {
     }
   }
   if (b.classList.contains('loadRecipe')) loadRecipe(b.dataset.id);
+  if (b.classList.contains('recipeScale')) loadScaledRecipe(b.dataset.id, b.dataset.servings);
 });
 
 document.addEventListener('input', e => {
@@ -1393,8 +1394,11 @@ function renderRecipes() {
           <div class="macro" style="margin-top:2px">${calcMacroHtml}</div>
           ${authorMacroHtml}
         </div>
-        <div style="display:flex;gap:6px;align-self:start">
+        <div class="recipeActions" style="display:flex;gap:6px;align-self:start;flex-wrap:wrap">
           <button class="secondary loadRecipe" data-id="${r.id}">Otvori u Kreatoru</button>
+          <button class="secondary recipeScale" data-id="${r.id}" data-servings="1">1 porcija</button>
+          <button class="secondary recipeScale" data-id="${r.id}" data-servings="2">2 porcije</button>
+          <button class="secondary recipeScale" data-id="${r.id}" data-servings="4">4 porcije</button>
           <button class="danger deleteRecipe" data-id="${r.id}">Obriši</button>
         </div>
       </div>
@@ -1408,6 +1412,28 @@ function renderRecipes() {
 
 $('#recipeSearch')?.addEventListener('input', renderRecipes);
 $('#recipeSort')?.addEventListener('change', renderRecipes);
+
+function loadScaledRecipe(rid, targetServings) {
+  const r = recipes.find(x => x.id === rid);
+  if (!r) return;
+  const live = recipeLiveState(r);
+  const target = Math.max(1, Math.round(Number(targetServings) || 1));
+  const factor = target / live.servings;
+  meal = {
+    recipeId: null,
+    name: `${r.name} – ${target} ${target === 1 ? 'porcija' : 'porcije'}`,
+    servings: target,
+    items: live.items.map(it => ({ ...it, qty: Number(it.qty) * factor })),
+    instructions: r.instructions || '',
+    authorMacros: r.authorMacros || null
+  };
+  $('#mealName').value = meal.name;
+  $('#mealServings').value = target;
+  updateEditingBanner();
+  activateTab('creator');
+  renderMeal();
+  showToast(`Recept skaliran na ${target} ${target === 1 ? 'porciju' : 'porcije'}.`);
+}
 
 function loadRecipe(rid) {
   const r = recipes.find(x => x.id === rid);
