@@ -397,14 +397,14 @@ async function loadAll() {
 function activateTab(tab) {
   const target = $('#tabs button[data-tab="' + tab + '"]');
   if (!target) return;
-  $$$('#tabs button').forEach(x => x.classList.toggle('active', x.dataset.tab === tab));
+  $$('#tabs button').forEach(x => x.classList.toggle('active', x.dataset.tab === tab));
   $$('.view').forEach(v => v.classList.toggle('active', v.id === tab));
   $$('#mobileBottomNav [data-mobile-tab]').forEach(x => x.classList.toggle('active', x.dataset.mobileTab === tab));
   if (tab === 'shoplist') renderShoppingList();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-$$$('#tabs button').forEach(b => b.onclick = () => activateTab(b.dataset.tab));
+$$('#tabs button').forEach(b => b.onclick = () => activateTab(b.dataset.tab));
 $$('#mobileBottomNav [data-mobile-tab]').forEach(b => b.onclick = () => activateTab(b.dataset.mobileTab));
 const mobileMoreBtn = $('#mobileMoreBtn');
 if (mobileMoreBtn) mobileMoreBtn.onclick = () => $('#hamburgerBtn')?.click();
