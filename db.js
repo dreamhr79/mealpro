@@ -145,3 +145,34 @@ async function dbRestorePersonalData(dataByStore,dayPlanValue){
   tx.onabort=()=>rej(tx.error||Error('Vraćanje backupa je prekinuto.'));
  });
 }
+
+
+async function dbSyncCatalogModel(products,offers,syncedAt){
+ const d=await openDB();
+ const oldOffers=await dbAll('offers');
+ const oldById=new Map(oldOffers.map(o=>[o.id,o]));
+ const changed=[];
+ for(const o of offers||[]){
+  const prev=oldById.get(o.id);
+  if(!prev || Number(prev.price)!==Number(o.price) || !!prev.onSale!==!!o.onSale){
+   changed.push({
+    productKey:o.productKey,offerId:o.id,store:o.store,price:o.price,
+    onSale:!!o.onSale,recordedAt:syncedAt
+   });
+  }
+ }
+ return new Promise((res,rej)=>{
+  const tx=d.transaction(['products','offers','priceHistory'],'readwrite');
+  const ps=tx.objectStore('products'),os=tx.objectStore('offers'),hs=tx.objectStore('priceHistory');
+  // Products are canonical and upserted: the same product is not duplicated on refresh.
+  for(const p of products||[])ps.put(p);
+  // Offers store contains current state only, so stale prices do not accumulate here.
+  os.clear();
+  for(const o of offers||[])os.put(o);
+  // History grows only when an offer is new or its effective price/sale state changed.
+  for(const h of changed)hs.add(h);
+  tx.oncomplete=()=>res({products:(products||[]).length,offers:(offers||[]).length,priceChanges:changed.length});
+  tx.onerror=()=>rej(tx.error||Error('Sinkronizacija modela proizvoda i cijena nije uspjela.'));
+  tx.onabort=()=>rej(tx.error||Error('Sinkronizacija modela proizvoda i cijena je prekinuta.'));
+ });
+}
