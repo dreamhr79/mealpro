@@ -34,7 +34,8 @@ jobs:
           rm -rf _site
           mkdir _site
           cp app.html _site/index.html
-          cp app.js db.js zip.js styles.css catalog-repository.js supabase-catalog-adapter.js config.js manifest.webmanifest sw.js _site/
+          cp app.js db.js zip.js styles.css catalog-repository.js supabase-catalog-adapter.js config.js _site/
+          # Test site deliberately excludes the legacy service worker/PWA manifest to prevent stale caches.
           if [ -d icons ]; then cp -R icons _site/icons; fi
           echo "$GITHUB_SHA" > _site/version.txt
           touch _site/.nojekyll
