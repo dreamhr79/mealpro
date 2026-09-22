@@ -397,21 +397,21 @@ async function loadAll() {
 function activateTab(tab) {
   const target = $('#tabs button[data-tab="' + tab + '"]');
   if (!target) return;
-  $$('#tabs button').forEach(x => x.classList.toggle('active', x.dataset.tab === tab));
+  $$$('#tabs button').forEach(x => x.classList.toggle('active', x.dataset.tab === tab));
   $$('.view').forEach(v => v.classList.toggle('active', v.id === tab));
   $$('#mobileBottomNav [data-mobile-tab]').forEach(x => x.classList.toggle('active', x.dataset.mobileTab === tab));
   if (tab === 'shoplist') renderShoppingList();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-$$('#tabs button').forEach(b => b.onclick = () => activateTab(b.dataset.tab));
+$$$('#tabs button').forEach(b => b.onclick = () => activateTab(b.dataset.tab));
 $$('#mobileBottomNav [data-mobile-tab]').forEach(b => b.onclick = () => activateTab(b.dataset.mobileTab));
 const mobileMoreBtn = $('#mobileMoreBtn');
 if (mobileMoreBtn) mobileMoreBtn.onclick = () => $('#hamburgerBtn')?.click();
 
 // Picker Tabs inside Creator
-$('.pickerTabs button').forEach(b => b.onclick = () => {
-  $('.pickerTabs button').forEach(x => x.classList.remove('active'));
+$$('.pickerTabs button').forEach(b => b.onclick = () => {
+  $$('.pickerTabs button').forEach(x => x.classList.remove('active'));
   b.classList.add('active');
   ['Favorites', 'Custom', 'Catalog'].forEach(t => {
     const el = $('#picker' + t);
@@ -2973,7 +2973,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Close drawer when clicking any tab on mobile
-  $('#tabs button').forEach(b => {
+  $$('#tabs button').forEach(b => {
     const origOnClick = b.onclick;
     b.onclick = (e) => {
       if (origOnClick) origOnClick(e);
