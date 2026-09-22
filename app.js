@@ -827,7 +827,17 @@ document.addEventListener('click', e => {
   updateMealTotals();
 });
 $('#mealName').oninput = e => meal.name = e.target.value;
-$('#mealServings').oninput = e => { meal.servings = Math.max(1, Number(e.target.value || 1)); updateMealTotals(); };
+$('#mealServings').oninput = e => {
+  const raw = Number(e.target.value);
+  meal.servings = Number.isFinite(raw) && raw > 0 ? raw : 1;
+  updateMealTotals();
+};
+$('#mealServings').onchange = e => {
+  const value = Math.max(1, Math.round(Number(e.target.value) || 1));
+  meal.servings = value;
+  e.target.value = value;
+  updateMealTotals();
+};
 
 // === CATALOG SEARCH & AUTO-ENRICHMENT ===
 async function searchCatalog(inp, out) {
