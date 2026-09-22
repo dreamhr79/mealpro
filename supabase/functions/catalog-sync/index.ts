@@ -1,6 +1,12 @@
 import { readZipFiles } from "./zip.ts";
 import { parseChain, normalizeRows } from "./normalize.ts";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS"
+};
+
 type Archive = { url?: string; date?: string; createdAt?: string; created_at?: string; timestamp?: string };
 
 function archiveTime(a: Archive) {
@@ -76,7 +82,8 @@ async function failSync(id: number | undefined, message: string) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method !== "POST") return new Response("Method not allowed", {status:405});
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return new Response("Method not allowed", {status:405, headers:corsHeaders});
   let syncId: number | undefined;
   const requestBody = await req.json().catch(() => ({}));
   try {
@@ -133,11 +140,11 @@ Deno.serve(async (req) => {
       ok:true, syncId, archiveDate:archive.date || null, archiveUrl:archive.url,
       archiveBytes:buffer.byteLength, chains, products:model.products.length, offers:model.offers.length,
       applied, stage:"published"
-    });
+    }, { headers:corsHeaders });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     try { await clearStage(); } catch (_) {}
     try { await failSync(syncId, message); } catch (_) {}
-    return Response.json({ok:false,error:message},{status:500});
+    return Response.json({ok:false,error:message},{status:500,headers:corsHeaders});
   }
 });
