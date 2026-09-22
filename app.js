@@ -797,7 +797,9 @@ async function favoriteFromCatalog(cid) {
   );
 
   if (existingFav) {
-    // Spriječi dupliciranje i ažuriraj ponude trgovina i najnižu cijenu
+    // Spriječi dupliciranje i ažuriraj ponude trgovina i najnižu cijenu.
+    // Sačuvaj ručno unesene makrose/kategoriju, ali propagiraj novu cijenu
+    // kroz postojeće recepte i dnevni plan.
     existingFav.catalogId = bestOffer.id;
     existingFav.name = bestOffer.name || existingFav.name;
     existingFav.brand = bestOffer.brand || existingFav.brand || '';
@@ -813,6 +815,7 @@ async function favoriteFromCatalog(cid) {
       pricePer100: o.pricePer100, onSale: o.onSale
     }));
     await dbPut('favorites', existingFav);
+    await propagateProductUpdate(existingFav);
     await loadAll();
     showToast(`Proizvod "${existingFav.name}" je već u favoritima. Ažurirane su cijene iz ${allOffers.length} trgovina!`);
     return existingFav;
