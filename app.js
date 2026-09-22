@@ -554,7 +554,13 @@ document.addEventListener('click', async e => {
     }
   }
   if (b.classList.contains('favFromCatalog')) {
-    const updatedFav = await favoriteFromCatalog(b.dataset.id);
+    let updatedFav = null;
+    try {
+      updatedFav = await favoriteFromCatalog(b.dataset.id);
+    } catch (err) {
+      console.error('Favorite catalog update error:', err);
+      showToast('Dodavanje ili osvježavanje favorita nije uspjelo.');
+    }
     if (updatedFav) {
       b.classList.add('isFavoriteBtn');
       b.textContent = '★ U favoritima';
@@ -569,7 +575,14 @@ document.addEventListener('click', async e => {
       }
     }
   }
-  if (b.classList.contains('baseToMeal')) await addCatalogToMeal(b.dataset.id);
+  if (b.classList.contains('baseToMeal')) {
+    try {
+      await addCatalogToMeal(b.dataset.id);
+    } catch (err) {
+      console.error('Catalog to meal error:', err);
+      showToast('Dodavanje proizvoda iz baze u obrok nije uspjelo.');
+    }
+  }
   if (b.classList.contains('deleteRecipe')) {
     if (confirm('Obrisati recept?')) {
       try {
