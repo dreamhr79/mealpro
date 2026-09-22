@@ -1420,23 +1420,40 @@ document.addEventListener('input', e => {
 
 document.addEventListener('change', async e => {
   if (e.target.classList.contains('dayQtyInput')) {
-    await saveDayPlan();
-    renderDayPlan();
+    try {
+      await saveDayPlan();
+      renderDayPlan();
+    } catch (err) {
+      console.error('Day quantity save error:', err);
+      showToast('Spremanje količine nije uspjelo.');
+    }
   }
 });
 
 document.addEventListener('click', async e => {
   if (e.target.classList.contains('removeBlock')) {
     const bi = Number(e.target.dataset.bi);
-    dayPlan.blocks.splice(bi, 1);
-    await saveDayPlan();
-    renderDayPlan();
+    const removed = dayPlan.blocks.splice(bi, 1)[0];
+    try {
+      await saveDayPlan();
+      renderDayPlan();
+    } catch (err) {
+      if (removed) dayPlan.blocks.splice(bi, 0, removed);
+      console.error('Remove day block error:', err);
+      showToast('Brisanje bloka nije uspjelo.');
+    }
   }
   if (e.target.classList.contains('removeDayItem')) {
     const bi = Number(e.target.dataset.bi), ii = Number(e.target.dataset.ii);
-    dayPlan.blocks[bi].items.splice(ii, 1);
-    await saveDayPlan();
-    renderDayPlan();
+    const removed = dayPlan.blocks[bi]?.items?.splice(ii, 1)[0];
+    try {
+      await saveDayPlan();
+      renderDayPlan();
+    } catch (err) {
+      if (removed && dayPlan.blocks[bi]) dayPlan.blocks[bi].items.splice(ii, 0, removed);
+      console.error('Remove day item error:', err);
+      showToast('Brisanje stavke nije uspjelo.');
+    }
   }
 });
 
