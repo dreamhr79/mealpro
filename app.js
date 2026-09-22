@@ -268,9 +268,13 @@ function macroText(p) {
 }
 
 function itemCost(p, q) {
-  if (!p.price || !p.pack) return 0;
-  if (p.unit === 'kom') return q * p.price;
-  return q * (p.price / p.pack);
+  const price = Number(p?.price) || 0;
+  const pack = Number(p?.pack) || 0;
+  const qty = Math.max(0, Number(q) || 0);
+  if (!(price > 0) || !(pack > 0) || !(qty > 0)) return 0;
+  // price is stored per purchasable package. This also supports multi-piece
+  // packages (e.g. 10 eggs): qty is expressed in pieces and pack is pieces/package.
+  return qty * (price / pack);
 }
 
 // === RENDER MEAL CREATOR ===
@@ -1549,7 +1553,9 @@ function generateShoppingList() {
       const packSize = Number(offer.pack) || Number(p.pack) || 100;
       const price = Number(offer.price);
       if (!(packSize > 0) || !(price >= 0)) continue;
-      const packsNeeded = p.unit === 'kom' ? Math.ceil(neededQty) : Math.ceil(neededQty / packSize);
+      // neededQty and packSize use the same normalized unit. For "kom",
+      // packSize can be >1 (e.g. 10 eggs), so whole-package rounding applies too.
+      const packsNeeded = Math.ceil(neededQty / packSize);
       const estCost = packsNeeded * price;
       if (!bestPurchase || estCost < bestPurchase.estCost ||
           (estCost === bestPurchase.estCost && getUnitValuePer100(offer) < getUnitValuePer100(bestPurchase.offer))) {
