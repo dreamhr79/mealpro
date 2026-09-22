@@ -84,3 +84,17 @@ create policy "public catalog sync status read"
 on public.catalog_syncs for select
 to anon, authenticated
 using (true);
+
+-- Idempotent policy for deployments where the base migration already ran.
+do $$ begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname='public' and tablename='catalog_syncs'
+      and policyname='public catalog sync status read'
+  ) then
+    create policy "public catalog sync status read"
+    on public.catalog_syncs for select
+    to anon, authenticated
+    using (true);
+  end if;
+end $$;
