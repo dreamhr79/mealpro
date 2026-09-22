@@ -1906,10 +1906,12 @@ $('#syncStart').onclick = async () => {
       if (!offersByKey.has(offer.productKey)) offersByKey.set(offer.productKey, []);
       offersByKey.get(offer.productKey).push(offer);
     }
+    const offerById = new Map(normalized.offers.map(o => [o.id, o]));
     for (const f of favorites) {
-      const productKey = f.id?.startsWith('ean:') || f.id?.startsWith('source:')
-        ? f.id
-        : (normalizeBarcode(f.barcode) ? `ean:${normalizeBarcode(f.barcode)}` : '');
+      const directKey = f.id?.startsWith('ean:') || f.id?.startsWith('source:') ? f.id : '';
+      const barcodeKey = normalizeBarcode(f.barcode) ? `ean:${normalizeBarcode(f.barcode)}` : '';
+      const legacyOfferKey = f.catalogId ? offerById.get(f.catalogId)?.productKey || '' : '';
+      const productKey = directKey || barcodeKey || legacyOfferKey;
       if (!productKey) continue;
       const product = productByKey.get(productKey);
       let offers = offersByKey.get(productKey) || [];
