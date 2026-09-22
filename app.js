@@ -8,8 +8,8 @@ let favorites = [], custom = [], recipes = [], meal = { recipeId: null, name: ''
 let dayPlan = { goals: { kcal: 2200, protein: 160, carbs: 220, fat: 70 }, blocks: [], settings: { kcalLocked: true, balance: 'carbs' } };
 let toastTimer;
 
-const $ = s => document.querySelector(s);
-const $$ = s => [...document.querySelectorAll(s)];
+var $ = s => document.querySelector(s);
+var $ = s => [...document.querySelectorAll(s)];
 window.addEventListener('error', e => {
   console.error('MealPro runtime error:', e.error || e.message);
   const state = document.querySelector('#syncState');
