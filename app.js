@@ -854,24 +854,21 @@ async function searchCatalog(inp, out) {
   });
 
   // Pouzdana provjera je li artikl u favoritima po barkodu ili ponudama
-  function isProductInFavorites(p, offers = []) {
-    const pCode = String(p.barcode || '').replace(/\D/g, '');
+  function isProductInFavorites(p, offers = [], productKey = canonicalProductKey(p)) {
+    const pCode = normalizeBarcode(p.barcode);
     const offerIds = new Set(offers.map(o => o.id));
-    offerIds.add(p.id);
 
     return favorites.some(f => {
-      const fCode = String(f.barcode || '').replace(/\D/g, '');
-      if (pCode.length >= 8 && fCode.length >= 8 && pCode === fCode) return true;
-      if (f.id && f.id.startsWith('ean:') && f.id.replace(/\D/g, '') === pCode) return true;
-      if (offerIds.has(f.catalogId) || offerIds.has(f.id)) return true;
-      if (f.offers && f.offers.some(fo => offerIds.has(fo.id) || (fo.store === p.store && Math.abs(fo.price - p.price) < 0.01))) return true;
-      if (norm(f.name) === norm(p.name) && String(f.pack) === String(p.pack) && f.unit === p.unit) return true;
-      return false;
+      if (productKey && f.id === productKey) return true;
+      const fCode = normalizeBarcode(f.barcode);
+      if (pCode && fCode === pCode) return true;
+      if (offerIds.has(f.catalogId)) return true;
+      return Array.isArray(f.offers) && f.offers.some(fo => offerIds.has(fo.id));
     });
   }
 
   out.innerHTML = groupedProducts.length ? groupedProducts.map(({ best: p, offers, productKey }) => {
-    const isFav = isProductInFavorites(p, offers);
+    const isFav = isProductInFavorites(p, offers, productKey);
     const unitVal = formatUnitValue(p);
     const multiStore = (offers.length > 1) ? ` <span class="pill" style="font-size:11px">${offers.length} trgovine</span>` : '';
     const saleTag = p.onSale ? '<span class="saleBadgeMini">🔥 AKCIJA</span>' : '';
