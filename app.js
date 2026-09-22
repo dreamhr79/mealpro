@@ -1870,6 +1870,13 @@ $('#syncStart').onclick = async () => {
     // Build the normalized model directly. We no longer persist the raw
     // per-store catalog, avoiding a duplicate copy of the same cijene.dev data.
     const normalized = buildNormalizedCatalogModel(all);
+    if (!normalized.products.length || !normalized.offers.length) {
+      throw Error('Normalizacija nije proizvela valjane proizvode i ponude. Postojeća baza nije promijenjena.');
+    }
+    const invalidOffers = normalized.offers.filter(o => !o.productKey || !(Number(o.price) > 0));
+    if (invalidOffers.length) {
+      throw Error(`Normalizacija je pronašla ${invalidOffers.length} nevaljanih ponuda. Postojeća baza nije promijenjena.`);
+    }
     log(`Spremam ${normalized.products.length.toLocaleString('hr-HR')} proizvoda i ${normalized.offers.length.toLocaleString('hr-HR')} aktualnih ponuda…`);
     const syncStamp = new Date().toISOString();
     const modelStats = await dbSyncCatalogModel(normalized.products, normalized.offers, syncStamp);
@@ -1912,7 +1919,7 @@ $('#syncStart').onclick = async () => {
       await propagateProductUpdate(f);
     }
 
-    await dbPut('meta', { key: 'sync', date: latest.date, count: all.length, products: modelStats.products, offers: modelStats.offers, priceChanges: modelStats.priceChanges, removedOffers: modelStats.removedOffers, missingChains, syncedAt: syncStamp });
+    await dbPut('meta', { key: 'sync', date: latest.date || null, archiveUrl: latest.url || null, count: all.length, products: modelStats.products, offers: modelStats.offers, priceChanges: modelStats.priceChanges, removedOffers: modelStats.removedOffers, missingChains, source: usingManualZip ? 'manual-zip' : 'cijene.dev', schemaVersion: 2, syncedAt: syncStamp });
     await loadAll();
     log(`Gotovo! Baza sadrži ${all.length.toLocaleString('hr-HR')} ažuriranih artikala.`);
     if (usingManualZip) {
