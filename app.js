@@ -1843,7 +1843,7 @@ $('#syncStart').onclick = async () => {
     const syncStamp = new Date().toISOString();
     const modelStats = await dbSyncCatalogModel(normalized.products, normalized.offers, syncStamp);
     const prunedHistory = await dbPrunePriceHistory(30);
-    log(`Model: ${modelStats.products.toLocaleString('hr-HR')} proizvoda · ${modelStats.offers.toLocaleString('hr-HR')} aktualnih ponuda · ${modelStats.priceChanges.toLocaleString('hr-HR')} promjena cijene`);
+    log(`Model: ${modelStats.products.toLocaleString('hr-HR')} proizvoda · ${modelStats.offers.toLocaleString('hr-HR')} aktualnih ponuda · ${modelStats.priceChanges.toLocaleString('hr-HR')} promjena cijene · ${modelStats.removedOffers.toLocaleString('hr-HR')} nestalih ponuda`);
     if (prunedHistory) log(`Povijest cijena: uklonjeno ${prunedHistory.toLocaleString('hr-HR')} zastarjelih zapisa (zadržano najviše 30 promjena po ponudi).`);
 
     // Refresh favorites from the normalized in-memory model without rebuilding
@@ -1881,7 +1881,7 @@ $('#syncStart').onclick = async () => {
       await propagateProductUpdate(f);
     }
 
-    await dbPut('meta', { key: 'sync', date: latest.date, count: all.length, products: modelStats.products, offers: modelStats.offers, priceChanges: modelStats.priceChanges, syncedAt: syncStamp });
+    await dbPut('meta', { key: 'sync', date: latest.date, count: all.length, products: modelStats.products, offers: modelStats.offers, priceChanges: modelStats.priceChanges, removedOffers: modelStats.removedOffers, missingChains, syncedAt: syncStamp });
     await loadAll();
     log(`Gotovo! Baza sadrži ${all.length.toLocaleString('hr-HR')} ažuriranih artikala.`);
     if (usingManualZip) {
