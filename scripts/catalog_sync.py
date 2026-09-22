@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import csv, io, json, os, re, tempfile, urllib.request, zipfile
+import csv, io, json, os, re, tempfile, urllib.request, urllib.error, zipfile
 
 SYNC_URL=os.environ["CATALOG_SYNC_URL"]
 TOKEN=os.environ["CATALOG_SYNC_TOKEN"]
@@ -9,8 +9,12 @@ NAMES={"konzum":"Konzum","lidl":"Lidl","spar":"SPAR","plodine":"Plodine","tommy"
 def post(payload):
     data=json.dumps(payload,separators=(",",":")).encode()
     req=urllib.request.Request(SYNC_URL,data=data,method="POST",headers={"Authorization":f"Bearer {TOKEN}","Content-Type":"application/json"})
-    with urllib.request.urlopen(req,timeout=120) as r:
-        out=json.load(r)
+    try:
+        with urllib.request.urlopen(req,timeout=120) as r:
+            out=json.load(r)
+    except urllib.error.HTTPError as e:
+        body=e.read().decode("utf-8","replace")
+        raise RuntimeError(f"Catalog API HTTP {e.code}: {body}") from e
     if not out.get("ok"): raise RuntimeError(out)
     return out
 
