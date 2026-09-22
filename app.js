@@ -698,6 +698,11 @@ function renderPicker() {
   $('#pickerCustom').innerHTML = sortedCustom.length ? sortedCustom.map(p => row(p, 'custom')).join('') : '<div class="empty">Nema osobnih proizvoda. Dodaj ih u tabu Moji proizvodi.</div>';
 }
 
+const creatorProductSearch = $('#creatorProductSearch');
+if (creatorProductSearch) {
+  creatorProductSearch.addEventListener('input', () => renderPicker());
+}
+
 // Event Delegation for meals
 document.addEventListener('click', async e => {
   const editBadge = e.target.closest('.editProduct, .quickEditMacro, .noMacroBadge');
