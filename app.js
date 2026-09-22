@@ -1345,11 +1345,19 @@ function recipeLiveState(recipe) {
 }
 
 function renderRecipes() {
-  const sortedRecipes = [...recipes].sort((a, b) => {
-    const da = String(a.savedAt || a.updatedAt || '');
-    const db = String(b.savedAt || b.updatedAt || '');
+  const query = norm($('#recipeSearch')?.value || '');
+  const sortMode = $('#recipeSort')?.value || 'newest';
+  const recipeRows = recipes.map(recipe => ({ recipe, live: recipeLiveState(recipe) }))
+    .filter(({ recipe, live }) => !query || norm(`${recipe.name || ''} ${live.items.map(it => it.product?.name || '').join(' ')}`).includes(query));
+
+  const sortedRecipes = recipeRows.sort((a, b) => {
+    if (sortMode === 'name') return String(a.recipe.name || '').localeCompare(String(b.recipe.name || ''), 'hr');
+    if (sortMode === 'cost') return (a.live.totals.cost / a.live.servings) - (b.live.totals.cost / b.live.servings);
+    if (sortMode === 'protein') return (b.live.totals.protein / b.live.servings) - (a.live.totals.protein / a.live.servings);
+    const da = String(a.recipe.savedAt || a.recipe.updatedAt || '');
+    const db = String(b.recipe.savedAt || b.recipe.updatedAt || '');
     return db.localeCompare(da);
-  });
+  }).map(x => x.recipe);
   $('#recipesList').innerHTML = sortedRecipes.length ? sortedRecipes.map(r => {
     const { items, servings, totals } = recipeLiveState(r);
     const cost = totals.cost;
@@ -1397,6 +1405,9 @@ function renderRecipes() {
     </div>`;
   }).join('') : '<div class="empty">Nema spremljenih recepata. Sastavi obrok u Kreatoru ili uvezi recept s Instagrama.</div>';
 }
+
+$('#recipeSearch')?.addEventListener('input', renderRecipes);
+$('#recipeSort')?.addEventListener('change', renderRecipes);
 
 function loadRecipe(rid) {
   const r = recipes.find(x => x.id === rid);
