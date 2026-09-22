@@ -562,6 +562,7 @@ function recipeDraft(nameOverride = null) {
 
 async function persistRecipe(recipe, { asCurrent = true } = {}) {
   await dbPut('recipes', recipe);
+  await trackRecipePrice(recipe);
   if (asCurrent) {
     meal.recipeId = recipe.id;
     meal.name = recipe.name;
