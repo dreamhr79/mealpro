@@ -2232,13 +2232,13 @@ $('#backupFileInput').onchange = async e => {
     const incomingCustom = structuredClone(data.custom || []);
     const incomingRecipes = structuredClone(data.recipes);
 
-    await dbClear('favorites');
-    await dbClear('custom');
-    await dbClear('recipes');
-
-    for (const item of incomingFavorites) await dbPut('favorites', item);
-    for (const item of incomingCustom) await dbPut('custom', item);
-    for (const item of incomingRecipes) await dbPut('recipes', item);
+    // One IndexedDB transaction: either all three personal stores are replaced,
+    // or IndexedDB rolls the whole restore back on failure.
+    await dbReplaceStores({
+      favorites: incomingFavorites,
+      custom: incomingCustom,
+      recipes: incomingRecipes
+    });
     if (data.dayPlan) {
       dayPlan = data.dayPlan;
       await saveDayPlan();
