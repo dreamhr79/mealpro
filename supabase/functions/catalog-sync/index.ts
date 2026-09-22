@@ -1,5 +1,5 @@
-import { listRemoteZip, readRemoteZipText } from "./zip.ts";
-import { parseChain, normalizeRows } from "./normalize.ts";
+import { listRemoteZip, readRemoteZipCsv } from "./zip.ts";
+import { createStreamingChainNormalizer } from "./normalize.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -119,11 +119,10 @@ Deno.serve(async (req) => {
       const priceEntry = archiveIndex.entries.get(`${chain}/prices.csv`);
       if (!productEntry || !priceEntry) { missingChains.push(chain); continue; }
 
-      const pricesText = await readRemoteZipText(archive.url, priceEntry);
-      const productsText = await readRemoteZipText(archive.url, productEntry);
-      const rows = parseChain(chain, productsText, pricesText);
-      const model = normalizeRows(rows);
-      rows.length = 0;
+      const normalizer = createStreamingChainNormalizer(chain);
+      await readRemoteZipCsv(archive.url, priceEntry, (row, i) => normalizer.acceptPrice(row, i));
+      await readRemoteZipCsv(archive.url, productEntry, (row, i) => normalizer.acceptProduct(row, i));
+      const model = normalizer.finish();
 
       if (!model.products.length || !model.offers.length) throw new Error(`Normalization produced an empty catalog for ${chain}`);
       if (model.offers.some(o => !o.product_id || !(Number(o.price) > 0))) throw new Error(`Normalization produced invalid offers for ${chain}`);
