@@ -1682,8 +1682,9 @@ $('#syncStart').onclick = async () => {
 
     if (!all.length) throw Error('U odabranim lancima nisu pronađeni valjani artikli. Postojeća baza nije promijenjena.');
     log(`Spremam ${all.length.toLocaleString('hr-HR')} artikala u bazu…`);
-    await dbClear('catalog');
-    await dbBulkPut('catalog', all, (n, t) => log(`Spremanje: ${n.toLocaleString('hr-HR')} / ${t.toLocaleString('hr-HR')}`));
+    // Clear + insert happen in one IndexedDB transaction. If any catalog write
+    // fails, the previous working catalog remains intact.
+    await dbReplaceStore('catalog', all, (n, t) => log(`Spremanje: ${n.toLocaleString('hr-HR')} / ${t.toLocaleString('hr-HR')}`));
 
     // Osvježi cijene postojećih favorita. EAN je kanonski identitet proizvoda:
     // isti fizički proizvod iz više trgovina ostaje jedan favorit s više ponuda.
