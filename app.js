@@ -2311,17 +2311,15 @@ $('#backupFileInput').onchange = async e => {
     const incomingCustom = structuredClone(data.custom || []);
     const incomingRecipes = structuredClone(data.recipes);
 
-    // One IndexedDB transaction: either all three personal stores are replaced,
-    // or IndexedDB rolls the whole restore back on failure.
-    await dbReplaceStores({
+    // One IndexedDB transaction: personal stores and Day Plan are restored
+    // together, so a failed import cannot leave a half-restored backup.
+    const incomingDayPlan = data.dayPlan ? structuredClone(data.dayPlan) : undefined;
+    await dbRestorePersonalData({
       favorites: incomingFavorites,
       custom: incomingCustom,
       recipes: incomingRecipes
-    });
-    if (data.dayPlan) {
-      dayPlan = data.dayPlan;
-      await saveDayPlan();
-    }
+    }, incomingDayPlan);
+    if (incomingDayPlan !== undefined) dayPlan = incomingDayPlan;
     await loadAll();
     $('#backupStatus').textContent = '✓ Backup je uspješno vraćen!';
     showToast('Podaci su uspješno vraćeni!');
