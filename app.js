@@ -473,8 +473,16 @@ $('#addMealToDayPlan').onclick = async () => {
       qty: (Number(it.qty) || 0) / divisor
     };
   });
-  dayPlan.blocks.push({ id: Date.now(), name, items: blockItems });
-  await saveDayPlan();
+  const block = { id: Date.now(), name, items: blockItems };
+  dayPlan.blocks.push(block);
+  try {
+    await saveDayPlan();
+  } catch (err) {
+    dayPlan.blocks.pop();
+    console.error('Add meal to day plan error:', err);
+    showToast('Dodavanje obroka u Dnevni plan nije uspjelo.');
+    return;
+  }
   renderDayPlan();
   showToast(`Obrok "${name}" je dodan u Dnevni plan!`);
   $('#tabs button[data-tab="dayplan"]').click();
