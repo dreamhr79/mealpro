@@ -36,7 +36,7 @@ returns table(products_count integer, offers_count integer, price_changes intege
 language plpgsql
 security definer
 set search_path = public
-as $
+as $$
 declare
   v_products integer;
   v_offers integer;
@@ -80,7 +80,7 @@ begin
 
   return query select v_products,v_offers,v_changes,v_removed;
 end;
-$;
+$$;
 
 revoke all on public.catalog_products_stage from anon, authenticated;
 revoke all on public.catalog_offers_stage from anon, authenticated;
