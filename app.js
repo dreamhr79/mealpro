@@ -865,14 +865,11 @@ async function favoriteFromCatalog(cid) {
   const p = await dbGet('catalog', cid);
   if (!p) return;
 
-  // Dohvati sve ponude za ovaj barkod kako bi u favoritima imali usporedbu svih trgovina
-  let allOffers = [p];
-  if (p.barcode && p.barcode.length >= 8) {
-    const barcodeOffers = await dbGetOffersByBarcode(p.barcode);
-    if (barcodeOffers && barcodeOffers.length) {
-      allOffers = barcodeOffers;
-    }
-  }
+  // Prefer the normalized Product -> current Offers model. Keep the legacy
+  // catalog lookup only as a compatibility fallback during Phase 2 migration.
+  const productKey = canonicalProductKey(p);
+  const normalized = await dbGetProductWithOffers(productKey);
+  let allOffers = normalized?.offers?.length ? normalized.offers : [p];
 
   // Isti EAN predstavlja isti fizički proizvod/pakiranje, pa je za favorita
   // relevantna najniža cijena pakiranja. €/100 g ostaje informativna metrika
@@ -893,9 +890,9 @@ async function favoriteFromCatalog(cid) {
     // Sačuvaj ručno unesene makrose/kategoriju, ali propagiraj novu cijenu
     // kroz postojeće recepte i dnevni plan.
     existingFav.catalogId = bestOffer.id;
-    existingFav.name = bestOffer.name || existingFav.name;
-    existingFav.brand = bestOffer.brand || existingFav.brand || '';
-    existingFav.barcode = p.barcode || existingFav.barcode || '';
+    existingFav.name = normalized?.product?.name || p.name || existingFav.name;
+    existingFav.brand = normalized?.product?.brand || p.brand || existingFav.brand || '';
+    existingFav.barcode = normalized?.product?.barcode || p.barcode || existingFav.barcode || '';
     existingFav.price = bestOffer.price;
     existingFav.store = bestOffer.store;
     existingFav.pack = bestOffer.pack;
@@ -914,11 +911,11 @@ async function favoriteFromCatalog(cid) {
   const newFav = {
     id: fid,
     catalogId: bestOffer.id,
-    barcode: p.barcode || '',
-    name: bestOffer.name,
-    brand: bestOffer.brand || '',
-    pack: bestOffer.pack,
-    unit: bestOffer.unit,
+    barcode: normalized?.product?.barcode || p.barcode || '',
+    name: normalized?.product?.name || p.name || '',
+    brand: normalized?.product?.brand || p.brand || '',
+    pack: normalized?.product?.pack || bestOffer.pack,
+    unit: normalized?.product?.unit || bestOffer.unit,
     price: bestOffer.price,
     store: bestOffer.store,
     pricePer100: bestOffer.pricePer100,
