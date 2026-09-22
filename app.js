@@ -1784,6 +1784,7 @@ $('#syncStart').onclick = async () => {
     const list = await lr.json(), latest = list.archives?.[0];
     if (!latest?.url) throw Error('Nema dostupnih arhiva.');
 
+    const usingManualZip = !!manualZipBuffer;
     let buf = manualZipBuffer;
     if (!buf) {
       log(`Preuzimam arhivu ${latest.date}…`);
@@ -1799,9 +1800,13 @@ $('#syncStart').onclick = async () => {
     const files = await readZipFiles(buf, wanted);
 
     const all = [];
+    const missingChains = [];
     for (const chain of chains) {
       const pt = files[`${chain}/products.csv`], pr = files[`${chain}/prices.csv`];
-      if (!pt || !pr) continue;
+      if (!pt || !pr) {
+        missingChains.push(CHAINS[chain] || chain);
+        continue;
+      }
       log(`Obrađujem ${CHAINS[chain]}…`);
       const prices = parseCsv(pr), best = new Map();
       for (let i = 1; i < prices.length; i++) {
@@ -1830,6 +1835,7 @@ $('#syncStart').onclick = async () => {
     }
 
     if (!all.length) throw Error('U odabranim lancima nisu pronađeni valjani artikli. Postojeća baza nije promijenjena.');
+    if (missingChains.length) log(`Upozorenje: ZIP nema potpune CSV podatke za: ${missingChains.join(', ')}. Ti lanci nisu ažurirani.`);
     // Build the normalized model directly. We no longer persist the raw
     // per-store catalog, avoiding a duplicate copy of the same cijene.dev data.
     const normalized = buildNormalizedCatalogModel(all);
@@ -1878,7 +1884,13 @@ $('#syncStart').onclick = async () => {
     await dbPut('meta', { key: 'sync', date: latest.date, count: all.length, products: modelStats.products, offers: modelStats.offers, priceChanges: modelStats.priceChanges, syncedAt: syncStamp });
     await loadAll();
     log(`Gotovo! Baza sadrži ${all.length.toLocaleString('hr-HR')} ažuriranih artikala.`);
-    showToast('Baza cijena je uspješno ažurirana!');
+    if (usingManualZip) {
+      manualZipBuffer = null;
+      const manualInput = $('#manualZip');
+      if (manualInput) manualInput.value = '';
+      log('Ručni ZIP je potrošen i uklonjen iz memorije.');
+    }
+    showToast(missingChains.length ? 'Baza je ažurirana, ali dio odabranih lanaca nije bio dostupan u ZIP-u.' : 'Baza cijena je uspješno ažurirana!');
     setTimeout(() => $('#syncDialog').close(), 1200);
   } catch (err) {
     console.error(err);
