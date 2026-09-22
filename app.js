@@ -50,6 +50,16 @@ function nval(v) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function normalizeBarcode(value) {
+  const code = String(value ?? '').replace(/\D/g, '');
+  return code.length >= 8 ? code : '';
+}
+
+function canonicalProductKey(product) {
+  const barcode = normalizeBarcode(product?.barcode);
+  return barcode ? `ean:${barcode}` : `catalog:${String(product?.id || product?.externalId || '')}`;
+}
+
 function packFromName(name) {
   const s = String(name || '').toLowerCase().replace(/,/g, '.').replace(/\s+/g, ' ').trim();
   if (!s) return null;
@@ -138,16 +148,16 @@ function resolveMealItemProduct(it) {
   if (!it) return { id: id(), name: 'Nepoznato', pack: 100, unit: 'g', price: 0, kcal: 0, protein: 0, carbs: 0, fat: 0 };
   const snapshot = it.product && typeof it.product === 'object' ? it.product : null;
   const productId = it.productId != null ? String(it.productId) : '';
-  const barcode = String(snapshot?.barcode || it.barcode || '').trim();
+  const barcode = normalizeBarcode(snapshot?.barcode || it.barcode);
 
   // Always prefer the current persisted product over the recipe/day-plan snapshot.
   // This keeps prices and macros live after a favorite is refreshed by catalog sync.
   let p = favorites.find(f =>
     (productId && (String(f.id) === productId || String(f.catalogId) === productId)) ||
-    (barcode && String(f.barcode || '') === barcode)
+    (barcode && normalizeBarcode(f.barcode) === barcode)
   ) || custom.find(c =>
     (productId && String(c.id) === productId) ||
-    (barcode && String(c.barcode || '') === barcode)
+    (barcode && normalizeBarcode(c.barcode) === barcode)
   ) || snapshot;
 
   if (!p) {
@@ -827,7 +837,7 @@ async function favoriteFromCatalog(cid) {
 
   // Provjera postoji li već favorit s istim barkodom ili istim ID-om
   const existingFav = favorites.find(f => 
-    (p.barcode && f.barcode && String(f.barcode) === String(p.barcode)) ||
+    (normalizeBarcode(p.barcode) && normalizeBarcode(f.barcode) === normalizeBarcode(p.barcode)) ||
     f.catalogId === p.id ||
     f.id === (p.barcode ? `ean:${p.barcode}` : `base:${p.id}`)
   );
@@ -857,7 +867,7 @@ async function favoriteFromCatalog(cid) {
     return existingFav;
   }
 
-  const fid = p.barcode ? `ean:${p.barcode}` : `base:${p.id}`;
+  const fid = canonicalProductKey(p);
   const newFav = {
     id: fid,
     catalogId: bestOffer.id,
@@ -1776,7 +1786,7 @@ $('#syncStart').onclick = async () => {
       for (let i = 1; i < products.length; i++) {
         const c = products[i], pid = (c[0] || '').trim(), name = (c[2] || '').trim(), bp = best.get(pid);
         if (!pid || !name || !bp) continue;
-        const pu = calcSmartPack(c[6], c[5], name, bp.price, bp.ppu), barcode = (c[1] || '').trim(), search = norm(`${name} ${c[3] || ''} ${barcode}`);
+        const pu = calcSmartPack(c[6], c[5], name, bp.price, bp.ppu), barcode = normalizeBarcode(c[1]), search = norm(`${name} ${c[3] || ''} ${barcode}`);
         all.push({
           id: `${chain}:${pid}`, externalId: pid, barcode, name,
           brand: (c[3] || '').trim(), pack: pu.pack, unit: pu.unit, price: bp.price,
