@@ -2258,19 +2258,51 @@ async function refreshCentralCatalogStatus({ toast = false } = {}) {
   }
 }
 
-$('#syncBtn').onclick = () => {
-  $('#syncDialog').showModal();
-  refreshCentralCatalogStatus();
-};
-$('#quickSyncBtn').onclick = () => {
-  $('#syncDialog').showModal();
-  refreshCentralCatalogStatus();
-};
+const SYNC_CHAINS = { konzum:'Konzum', lidl:'Lidl', spar:'SPAR', plodine:'Plodine', tommy:'Tommy', kaufland:'Kaufland', eurospin:'Eurospin', studenac:'Studenac', ktc:'KTC', metro:'Metro', ribola:'Ribola', ntl:'NTL' };
+function renderSyncChains() {
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem('mealpro-sync-chains') || '[]'); } catch (_) {}
+  if (!saved.length) saved = ['konzum','lidl','spar','plodine','tommy','kaufland'];
+  $('#chainChecks').innerHTML = Object.entries(SYNC_CHAINS).map(([key,name]) =>
+    `<label><input type="checkbox" value="${key}" ${saved.includes(key)?'checked':''}> ${name}</label>`
+  ).join('');
+}
+function selectedSyncChains() { return $('#chainChecks input:checked').map(x => x.value); }
+async function runCentralCatalogSync() {
+  const chains = selectedSyncChains();
+  if (!chains.length) return showToast('Odaberi barem jedan trgovački lanac.');
+  localStorage.setItem('mealpro-sync-chains', JSON.stringify(chains));
+  const progress = $('#syncProgress');
+  const cfg = globalThis.MEALPRO_CONFIG || {};
+  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) return showToast('Supabase nije konfiguriran.');
+  progress.textContent = 'Server obrađuje: ' + chains.map(x => SYNC_CHAINS[x]).join(', ') + '…';
+  $('#syncStart').disabled = true;
+  try {
+    const res = await fetch(cfg.supabaseUrl.replace(/\/$/,'') + '/functions/v1/catalog-sync', {
+      method:'POST',
+      headers:{ apikey:cfg.supabaseAnonKey, Authorization:'Bearer '+cfg.supabaseAnonKey, 'Content-Type':'application/json' },
+      body:JSON.stringify({ chains })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP '+res.status));
+    progress.textContent = `Gotovo: ${Number(data.products||0).toLocaleString('hr-HR')} proizvoda · ${Number(data.offers||0).toLocaleString('hr-HR')} ponuda.`;
+    await refreshCentralCatalogStatus();
+    await refreshFavoritesFromCatalog({ silent:false });
+    showToast('Centralna baza je uspješno ažurirana.');
+  } catch (err) {
+    console.error('Central catalog sync error:', err);
+    progress.textContent = 'Sinkronizacija nije uspjela: ' + err.message;
+    showToast('Ažuriranje centralne baze nije uspjelo.');
+  } finally { $('#syncStart').disabled = false; }
+}
+function openSyncDialog() { renderSyncChains(); $('#syncDialog').showModal(); refreshCentralCatalogStatus(); }
+$('#syncBtn').onclick = openSyncDialog;
+$('#quickSyncBtn').onclick = openSyncDialog;
 $('#syncCancel').onclick = () => $('#syncDialog').close();
-$('#syncStart').onclick = async () => {
-  await refreshCentralCatalogStatus({ toast: true });
-  await refreshFavoritesFromCatalog({ silent: false });
-};
+$('#syncCheck').onclick = () => refreshCentralCatalogStatus({ toast:true });
+$('#syncSelectAll').onclick = () => $('#chainChecks input').forEach(x => x.checked=true);
+$('#syncSelectNone').onclick = () => $('#chainChecks input').forEach(x => x.checked=false);
+$('#syncStart').onclick = runCentralCatalogSync;
 
 // === INSTAGRAM IMPORTER ===
 let igParsedItems = [];
