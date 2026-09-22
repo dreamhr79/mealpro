@@ -639,6 +639,26 @@ $('#addMealToDayPlan').onclick = async () => {
   activateTab('dayplan');
 };
 
+function addProductToMeal(product) {
+  const p = repairProductPackage(product);
+  if (!p) return false;
+  const productId = String(p.id || p.catalogId || '');
+  const barcode = normalizeBarcode(p.barcode);
+  const existing = meal.items.find(it => {
+    const current = resolveMealItemProduct(it);
+    return (productId && (String(current.id) === productId || String(current.catalogId) === productId)) ||
+      (barcode && normalizeBarcode(current.barcode) === barcode);
+  });
+  const defaultQty = p.unit === 'kom' ? 1 : 100;
+  if (existing) {
+    existing.qty = (Number(existing.qty) || 0) + defaultQty;
+  } else {
+    meal.items.push({ productId: p.id || p.catalogId || null, product: { ...p }, qty: defaultQty });
+  }
+  renderMeal();
+  return true;
+}
+
 function renderPicker() {
   const row = (p, source) => {
     const valBadge = formatUnitValue(p);
@@ -690,10 +710,7 @@ document.addEventListener('click', async e => {
   if (b.classList.contains('addMeal')) {
     const arr = (b.dataset.source === 'favorites') ? favorites : custom;
     const p = repairProductPackage(arr.find(x => x.id === b.dataset.id));
-    if (p) {
-      meal.items.push({ product: { ...p }, qty: p.unit === 'kom' ? 1 : 100 });
-      renderMeal();
-    }
+    if (p) addProductToMeal(p);
   }
   if (b.classList.contains('removeMeal')) {
     meal.items.splice(Number(b.dataset.i), 1);
@@ -1041,9 +1058,8 @@ async function refreshFavoritesFromCatalog({ silent = true } = {}) {
 async function addCatalogToMeal(cid) {
   const f = await favoriteFromCatalog(cid);
   if (!f) return;
-  meal.items.push({ product: { ...f }, qty: f.unit === 'kom' ? 1 : 100 });
+  addProductToMeal(f);
   activateTab('creator');
-  renderMeal();
 }
 
 // === FAVORITI & MOJI PROIZVODI ===
