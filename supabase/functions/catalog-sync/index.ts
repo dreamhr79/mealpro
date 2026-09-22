@@ -1,3 +1,6 @@
+import { readZipFiles } from "./zip.ts";
+import { parseChain, normalizeRows } from "./normalize.ts";
+
 type Archive = { url?: string; date?: string; createdAt?: string; created_at?: string; timestamp?: string };
 
 function archiveTime(a: Archive) {
@@ -64,16 +67,32 @@ Deno.serve(async (req) => {
     // normalization are the next isolated step; clients never receive the ZIP.
     const zipRes = await fetch(archive.url);
     if (!zipRes.ok) throw new Error(`Archive download failed: ${zipRes.status}`);
-    const bytes = new Uint8Array(await zipRes.arrayBuffer());
-    if (!bytes.length) throw new Error("Downloaded archive is empty");
+    const buffer = await zipRes.arrayBuffer();
+    if (!buffer.byteLength) throw new Error("Downloaded archive is empty");
+
+    const chains = ["konzum","lidl","spar","plodine","tommy","eurospin","kaufland","studenac","ktc","metro","ribola","ntl"];
+    const files = await readZipFiles(buffer, name => chains.some(chain =>
+      name === `${chain}/products.csv` || name === `${chain}/prices.csv`
+    ));
+    const rows = [];
+    const missingChains = [];
+    for (const chain of chains) {
+      const products = files[`${chain}/products.csv`];
+      const prices = files[`${chain}/prices.csv`];
+      if (!products || !prices) { missingChains.push(chain); continue; }
+      rows.push(...parseChain(chain, products, prices));
+    }
+    if (!rows.length) throw new Error("Archive contains no valid catalog rows");
+    if (missingChains.length) throw new Error("Incomplete archive; missing chains: " + missingChains.join(", "));
+
+    const model = normalizeRows(rows);
+    if (!model.products.length || !model.offers.length) throw new Error("Normalization produced an empty catalog");
+    if (model.offers.some(o => !o.product_id || !(Number(o.price) > 0))) throw new Error("Normalization produced invalid offers");
 
     return Response.json({
-      ok:true,
-      syncId,
-      archiveDate:archive.date || null,
-      archiveUrl:archive.url,
-      archiveBytes:bytes.length,
-      stage:"downloaded"
+      ok:true, syncId, archiveDate:archive.date || null, archiveUrl:archive.url,
+      archiveBytes:buffer.byteLength, products:model.products.length, offers:model.offers.length,
+      stage:"normalized"
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
