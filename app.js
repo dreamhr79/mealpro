@@ -66,7 +66,15 @@ function packFromName(name) {
     }
   }
 
-  // 2. Direct weight/volume in title: e.g. "500 G", "500g", "1 kg", "250 ml", "0.5 l", "1.5 l"
+  // 2. Piece multipack: e.g. "10 kom", "6 komada". Keep quantity in pieces
+  // so recipe costing and the shopping list can divide package price correctly.
+  let pc = s.match(/(?:^|\s)(\d{1,3})\s*(?:kom|komada|komad)\b/i);
+  if (pc) {
+    const count = Number(pc[1]);
+    if (count > 0 && count <= 200) return { pack: count, unit: 'kom', source: 'name-pieces' };
+  }
+
+  // 3. Direct weight/volume in title: e.g. "500 G", "500g", "1 kg", "250 ml", "0.5 l", "1.5 l"
   const ms = [...s.matchAll(/(\d+(?:\.\d+)?)\s*(kg|g|l|ml)\b/ig)];
   if (ms.length) {
     const z = ms[ms.length - 1], n = Number(z[1]), u = z[2].toLowerCase();
@@ -80,17 +88,20 @@ function packFromName(name) {
   return null;
 }
 
-function packFromUnitPrice(price, ppu) {
-  const p = Number(price) || 0, u = Number(ppu) || 0;
-  if (p > 0 && u > 0) {
-    const ratio = p / u; // e.g. 0.75 / 1.50 = 0.5 kg or 0.5 L
-    if (ratio > 0.005 && ratio < 50) {
-      const gramsOrMl = Math.round(ratio * 1000);
-      if (gramsOrMl >= 10) {
-        return { pack: gramsOrMl, unit: 'g', source: 'unit-price' };
-      }
-    }
-  }
+function packFromUnitPrice(price, ppu, rawUnit = '') {
+  const p = Number(price) || 0, unitPrice = Number(ppu) || 0;
+  if (!(p > 0) || !(unitPrice > 0)) return null;
+
+  const ratio = p / unitPrice; // package share of 1 kg / 1 L
+  if (!(ratio > 0.005 && ratio < 50)) return null;
+  const pack = Math.round(ratio * 1000);
+  if (pack < 10) return null;
+
+  const u = norm(rawUnit);
+  // Unit-price math alone cannot distinguish kg from L. Preserve the source
+  // unit when it tells us; otherwise do not invent grams for an unknown "kom".
+  if (u === 'l' || u === 'ml') return { pack, unit: 'ml', source: 'unit-price' };
+  if (u === 'kg' || u === 'g') return { pack, unit: 'g', source: 'unit-price' };
   return null;
 }
 
@@ -100,7 +111,7 @@ function calcSmartPack(rawQty, rawUnit, name, price = 0, ppu = 0) {
   if (fromName) return fromName;
 
   // Signal 2: Izračun iz jedinične cijene u trgovini (cijena po kg / L)
-  const fromPpu = packFromUnitPrice(price, ppu);
+  const fromPpu = packFromUnitPrice(price, ppu, rawUnit);
 
   let q = nval(rawQty), u = norm(rawUnit);
   let parsedUnit = (u === 'kg' || u === 'g') ? 'g' : (u === 'l' || u === 'ml') ? 'ml' : 'kom';
@@ -125,12 +136,20 @@ function calcSmartPack(rawQty, rawUnit, name, price = 0, ppu = 0) {
 
 function resolveMealItemProduct(it) {
   if (!it) return { id: id(), name: 'Nepoznato', pack: 100, unit: 'g', price: 0, kcal: 0, protein: 0, carbs: 0, fat: 0 };
-  let p = it.product;
-  if (!p && it.productId != null) {
-    p = favorites.find(f => String(f.id) === String(it.productId) || String(f.catalogId) === String(it.productId))
-     || custom.find(c => String(c.id) === String(it.productId))
-     || products.find(x => String(x.id) === String(it.productId));
-  }
+  const snapshot = it.product && typeof it.product === 'object' ? it.product : null;
+  const productId = it.productId != null ? String(it.productId) : '';
+  const barcode = String(snapshot?.barcode || it.barcode || '').trim();
+
+  // Always prefer the current persisted product over the recipe/day-plan snapshot.
+  // This keeps prices and macros live after a favorite is refreshed by catalog sync.
+  let p = favorites.find(f =>
+    (productId && (String(f.id) === productId || String(f.catalogId) === productId)) ||
+    (barcode && String(f.barcode || '') === barcode)
+  ) || custom.find(c =>
+    (productId && String(c.id) === productId) ||
+    (barcode && String(c.barcode || '') === barcode)
+  ) || snapshot;
+
   if (!p) {
     p = it.product || {
       id: 'unlinked:' + id(),
@@ -194,10 +213,12 @@ async function loadAll() {
   favorites = (await dbAll('favorites')).map(repairProductPackage);
   custom = (await dbAll('custom')).map(repairProductPackage);
   recipes = (await dbAll('recipes')).map(r => {
-    if (r.items) {
-      r.items = r.items.map(it => ({ ...it, product: repairProductPackage(it.product) }));
-    }
-    return r;
+    const safeRecipe = r && typeof r === 'object' ? r : {};
+    safeRecipe.items = Array.isArray(safeRecipe.items)
+      ? safeRecipe.items.map(it => ({ ...it, product: resolveMealItemProduct(it) }))
+      : [];
+    safeRecipe.servings = Math.max(1, Number(safeRecipe.servings) || 1);
+    return safeRecipe;
   });
 
   // Automatsko uklanjanje privremenih fantomskih unosa iz 'Mojih proizvoda' ako su ranije nastali uvozom
@@ -211,7 +232,17 @@ async function loadAll() {
   if (mSync) $('#syncState').textContent = `Baza: ${mSync.date} · ${mSync.count.toLocaleString('hr-HR')} artikala`;
   
   const mDay = await dbGet('meta', 'dayPlan');
-  if (mDay && mDay.val) dayPlan = mDay.val;
+  if (mDay && mDay.val) {
+    dayPlan = mDay.val;
+    dayPlan.blocks = Array.isArray(dayPlan.blocks) ? dayPlan.blocks : [];
+    dayPlan.goals = dayPlan.goals || { kcal: 2200, protein: 160, carbs: 220, fat: 70 };
+    dayPlan.settings = dayPlan.settings || { kcalLocked: true, balance: 'carbs' };
+    for (const block of dayPlan.blocks) {
+      block.items = Array.isArray(block.items)
+        ? block.items.map(it => ({ ...it, product: resolveMealItemProduct(it) }))
+        : [];
+    }
+  }
 
   renderFavorites();
   renderCustom();
@@ -248,9 +279,13 @@ function macroText(p) {
 }
 
 function itemCost(p, q) {
-  if (!p.price || !p.pack) return 0;
-  if (p.unit === 'kom') return q * p.price;
-  return q * (p.price / p.pack);
+  const price = Number(p?.price) || 0;
+  const pack = Number(p?.pack) || 0;
+  const qty = Math.max(0, Number(q) || 0);
+  if (!(price > 0) || !(pack > 0) || !(qty > 0)) return 0;
+  // price is stored per purchasable package. This also supports multi-piece
+  // packages (e.g. 10 eggs): qty is expressed in pieces and pack is pieces/package.
+  return qty * (price / pack);
 }
 
 // === RENDER MEAL CREATOR ===
@@ -258,7 +293,10 @@ function updateMealTotals() {
   meal.servings = Math.max(1, Number($('#mealServings')?.value || meal.servings || 1));
   let t = { kcal: 0, protein: 0, carbs: 0, fat: 0, cost: 0 };
   for (const it of meal.items) {
-    const p = it.product, q = it.qty, f = (p.unit === 'kom' ? q : q / 100);
+    const p = resolveMealItemProduct(it);
+    it.product = p;
+    const q = Number(it.qty) || 0;
+    const f = (p.unit === 'kom' ? q : q / 100);
     t.kcal += Number(p.kcal || 0) * f;
     t.protein += Number(p.protein || 0) * f;
     t.carbs += Number(p.carbs || 0) * f;
@@ -344,6 +382,7 @@ document.getElementById('cancelEditingRecipe')?.addEventListener('click', () => 
 });
 
 $('#saveRecipe').onclick = async () => {
+  try {
   const name = $('#mealName').value.trim();
   if (!name) return alert('Upiši naziv obroka.');
   if (!meal.items.length) return alert('Dodaj barem jednu namirnicu.');
@@ -400,9 +439,14 @@ $('#saveRecipe').onclick = async () => {
   updateEditingBanner();
   $('#recipeCount').textContent = `(${recipes.length})`;
   showToast(`Recept "${name}" je spremljen!`);
+  } catch (err) {
+    console.error('Recipe save error:', err);
+    showToast('Spremanje recepta nije uspjelo. Postojeći podaci nisu obrisani.');
+  }
 };
 
 document.getElementById('saveRecipeCopy')?.addEventListener('click', async () => {
+  try {
   const baseName = $('#mealName').value.trim() || 'Recept';
   const copyName = baseName.includes('(kopija)') ? baseName : `${baseName} (kopija)`;
   const serv = Math.max(1, Number($('#mealServings').value || 1));
@@ -426,19 +470,34 @@ document.getElementById('saveRecipeCopy')?.addEventListener('click', async () =>
   updateEditingBanner();
   $('#recipeCount').textContent = `(${recipes.length})`;
   showToast(`Spremljeno kao novi recept: "${copyName}"!`);
+  } catch (err) {
+    console.error('Recipe copy save error:', err);
+    showToast('Spremanje kopije recepta nije uspjelo.');
+  }
 });
 
 $('#addMealToDayPlan').onclick = async () => {
   if (!meal.items.length) return alert('Obrok nema sastojaka.');
   const name = $('#mealName').value.trim() || 'Obrok';
   const divisor = Math.max(1, meal.servings || 1);
-  const blockItems = meal.items.map(it => ({
-    productId: it.product.id,
-    product: it.product,
-    qty: (Number(it.qty) || 0) / divisor
-  }));
-  dayPlan.blocks.push({ id: Date.now(), name, items: blockItems });
-  await saveDayPlan();
+  const blockItems = meal.items.map(it => {
+    const p = resolveMealItemProduct(it);
+    return {
+      productId: p.id || it.productId || null,
+      product: { ...p },
+      qty: (Number(it.qty) || 0) / divisor
+    };
+  });
+  const block = { id: Date.now(), name, items: blockItems };
+  dayPlan.blocks.push(block);
+  try {
+    await saveDayPlan();
+  } catch (err) {
+    dayPlan.blocks.pop();
+    console.error('Add meal to day plan error:', err);
+    showToast('Dodavanje obroka u Dnevni plan nije uspjelo.');
+    return;
+  }
   renderDayPlan();
   showToast(`Obrok "${name}" je dodan u Dnevni plan!`);
   $('#tabs button[data-tab="dayplan"]').click();
@@ -507,12 +566,24 @@ document.addEventListener('click', async e => {
   if (b.classList.contains('editProduct')) openProductDialog(b.dataset.type, b.dataset.id);
   if (b.classList.contains('deleteProduct')) {
     if (confirm('Obrisati ovaj proizvod?')) {
-      await dbDelete(b.dataset.type, b.dataset.id);
-      await loadAll();
+      try {
+        await dbDelete(b.dataset.type, b.dataset.id);
+        await loadAll();
+        showToast('Proizvod je obrisan.');
+      } catch (err) {
+        console.error('Product delete error:', err);
+        showToast('Brisanje proizvoda nije uspjelo.');
+      }
     }
   }
   if (b.classList.contains('favFromCatalog')) {
-    const updatedFav = await favoriteFromCatalog(b.dataset.id);
+    let updatedFav = null;
+    try {
+      updatedFav = await favoriteFromCatalog(b.dataset.id);
+    } catch (err) {
+      console.error('Favorite catalog update error:', err);
+      showToast('Dodavanje ili osvježavanje favorita nije uspjelo.');
+    }
     if (updatedFav) {
       b.classList.add('isFavoriteBtn');
       b.textContent = '★ U favoritima';
@@ -527,13 +598,30 @@ document.addEventListener('click', async e => {
       }
     }
   }
-  if (b.classList.contains('baseToMeal')) await addCatalogToMeal(b.dataset.id);
+  if (b.classList.contains('baseToMeal')) {
+    try {
+      await addCatalogToMeal(b.dataset.id);
+    } catch (err) {
+      console.error('Catalog to meal error:', err);
+      showToast('Dodavanje proizvoda iz baze u obrok nije uspjelo.');
+    }
+  }
   if (b.classList.contains('deleteRecipe')) {
     if (confirm('Obrisati recept?')) {
-      await dbDelete('recipes', b.dataset.id);
-      recipes = await dbAll('recipes');
-      renderRecipes();
-      $('#recipeCount').textContent = `(${recipes.length})`;
+      try {
+        await dbDelete('recipes', b.dataset.id);
+        recipes = await dbAll('recipes');
+        if (meal.recipeId === b.dataset.id) {
+          meal.recipeId = null;
+          updateEditingBanner();
+        }
+        renderRecipes();
+        $('#recipeCount').textContent = `(${recipes.length})`;
+        showToast('Recept je obrisan.');
+      } catch (err) {
+        console.error('Recipe delete error:', err);
+        showToast('Brisanje recepta nije uspjelo.');
+      }
     }
   }
   if (b.classList.contains('loadRecipe')) loadRecipe(b.dataset.id);
@@ -636,6 +724,12 @@ async function searchCatalog(inp, out) {
   const groupedProducts = [];
   for (const [key, items] of groupMap.entries()) {
     items.sort((a, b) => {
+      // Inside one EAN group every row is the same physical product, so the
+      // cheapest store price is the offer we should present as the default.
+      if (key.startsWith('ean:')) {
+        const ap = Number(a.price) || Infinity, bp = Number(b.price) || Infinity;
+        if (ap !== bp) return ap - bp;
+      }
       const va = getUnitValuePer100(a), vb = getUnitValuePer100(b);
       if (Number.isFinite(va) && Number.isFinite(vb) && va !== vb) return va - vb;
       return (Number(a.price) || 0) - (Number(b.price) || 0);
@@ -718,11 +812,15 @@ async function favoriteFromCatalog(cid) {
     }
   }
 
-  // Poredaj ponude po isplativosti (€ / 100g) pa po cijeni
+  // Isti EAN predstavlja isti fizički proizvod/pakiranje, pa je za favorita
+  // relevantna najniža cijena pakiranja. €/100 g ostaje informativna metrika
+  // za usporedbu različitih proizvoda i veličina pakiranja.
   allOffers.sort((a, b) => {
-    const va = getUnitValuePer100(a), vb = getUnitValuePer100(b);
-    if (Number.isFinite(va) && Number.isFinite(vb) && va !== vb) return va - vb;
-    return (Number(a.price) || 0) - (Number(b.price) || 0);
+    const ap = Number(a.price), bp = Number(b.price);
+    const aHas = Number.isFinite(ap) && ap > 0, bHas = Number.isFinite(bp) && bp > 0;
+    if (aHas && bHas && ap !== bp) return ap - bp;
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    return getUnitValuePer100(a) - getUnitValuePer100(b);
   });
 
   const bestOffer = allOffers[0];
@@ -735,7 +833,13 @@ async function favoriteFromCatalog(cid) {
   );
 
   if (existingFav) {
-    // Spriječi dupliciranje i ažuriraj ponude trgovina i najnižu cijenu
+    // Spriječi dupliciranje i ažuriraj ponude trgovina i najnižu cijenu.
+    // Sačuvaj ručno unesene makrose/kategoriju, ali propagiraj novu cijenu
+    // kroz postojeće recepte i dnevni plan.
+    existingFav.catalogId = bestOffer.id;
+    existingFav.name = bestOffer.name || existingFav.name;
+    existingFav.brand = bestOffer.brand || existingFav.brand || '';
+    existingFav.barcode = p.barcode || existingFav.barcode || '';
     existingFav.price = bestOffer.price;
     existingFav.store = bestOffer.store;
     existingFav.pack = bestOffer.pack;
@@ -743,10 +847,11 @@ async function favoriteFromCatalog(cid) {
     existingFav.pricePer100 = bestOffer.pricePer100;
     existingFav.onSale = bestOffer.onSale;
     existingFav.offers = allOffers.map(o => ({
-      store: o.store, price: o.price, pack: o.pack, unit: o.unit,
+      id: o.id, store: o.store, price: o.price, pack: o.pack, unit: o.unit,
       pricePer100: o.pricePer100, onSale: o.onSale
     }));
     await dbPut('favorites', existingFav);
+    await propagateProductUpdate(existingFav);
     await loadAll();
     showToast(`Proizvod "${existingFav.name}" je već u favoritima. Ažurirane su cijene iz ${allOffers.length} trgovina!`);
     return existingFav;
@@ -766,7 +871,7 @@ async function favoriteFromCatalog(cid) {
     pricePer100: bestOffer.pricePer100,
     onSale: bestOffer.onSale,
     offers: allOffers.map(o => ({
-      store: o.store, price: o.price, pack: o.pack, unit: o.unit,
+      id: o.id, store: o.store, price: o.price, pack: o.pack, unit: o.unit,
       pricePer100: o.pricePer100, onSale: o.onSale
     })),
     kcal: 0, protein: 0, carbs: 0, fat: 0,
@@ -983,10 +1088,19 @@ $('#lookupOffBtn').onclick = async () => {
 };
 
 async function propagateProductUpdate(updatedObj) {
+  const matches = it => {
+    if (!it) return false;
+    const p = it.product || {};
+    return String(p.id || '') === String(updatedObj.id || '') ||
+      String(it.productId || '') === String(updatedObj.id || '') ||
+      String(it.productId || '') === String(updatedObj.catalogId || '') ||
+      (updatedObj.barcode && String(p.barcode || it.barcode || '') === String(updatedObj.barcode));
+  };
   for (const r of recipes) {
     let changed = false;
     for (const it of r.items || []) {
-      if (it.product && (String(it.product.id) === String(updatedObj.id) || (updatedObj.barcode && String(it.product.barcode) === String(updatedObj.barcode)))) {
+      if (matches(it)) {
+        it.productId = updatedObj.id;
         it.product = { ...updatedObj };
         changed = true;
       }
@@ -998,7 +1112,8 @@ async function propagateProductUpdate(updatedObj) {
   if (dayPlan && dayPlan.blocks) {
     for (const b of dayPlan.blocks) {
       for (const it of b.items || []) {
-        if (it.product && (String(it.product.id) === String(updatedObj.id) || (updatedObj.barcode && String(it.product.barcode) === String(updatedObj.barcode)))) {
+        if (matches(it)) {
+          it.productId = updatedObj.id;
           it.product = { ...updatedObj };
         }
       }
@@ -1006,7 +1121,8 @@ async function propagateProductUpdate(updatedObj) {
     await saveDayPlan();
   }
   for (const it of meal.items || []) {
-    if (it.product && (String(it.product.id) === String(updatedObj.id) || (updatedObj.barcode && String(it.product.barcode) === String(updatedObj.barcode)))) {
+    if (matches(it)) {
+      it.productId = updatedObj.id;
       it.product = { ...updatedObj };
     }
   }
@@ -1037,29 +1153,41 @@ $('#productForm').onsubmit = async e => {
     updatedAt: new Date().toISOString()
   };
 
-  await dbPut(type, obj);
-  await propagateProductUpdate(obj);
-  $('#productDialog').close();
-  await loadAll();
-  renderMeal();
-  showToast('✓ Proizvod i cijene u receptima su uspješno ažurirani!');
+  try {
+    await dbPut(type, obj);
+    await propagateProductUpdate(obj);
+    $('#productDialog').close();
+    await loadAll();
+    renderMeal();
+    showToast('✓ Proizvod i cijene u receptima su uspješno ažurirani!');
+  } catch (err) {
+    console.error('Product save error:', err);
+    showToast('Spremanje proizvoda nije uspjelo.');
+  }
 };
 
 // === RECEPTI ===
 function renderRecipes() {
-  $('#recipesList').innerHTML = recipes.length ? recipes.sort((a, b) => b.savedAt.localeCompare(a.savedAt)).map(r => {
-    const cost = r.items.reduce((s, it) => s + itemCost(it.product, it.qty), 0);
+  const sortedRecipes = [...recipes].sort((a, b) => {
+    const da = String(a.savedAt || a.updatedAt || '');
+    const db = String(b.savedAt || b.updatedAt || '');
+    return db.localeCompare(da);
+  });
+  $('#recipesList').innerHTML = sortedRecipes.length ? sortedRecipes.map(r => {
+    const items = Array.isArray(r.items) ? r.items.map(it => ({ ...it, product: resolveMealItemProduct(it) })) : [];
+    const servings = Math.max(1, Number(r.servings) || 1);
+    const cost = items.reduce((s, it) => s + itemCost(it.product, Number(it.qty) || 0), 0);
     
     // Izračunaj makrose iz sastojaka
     let t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
-    for (const it of r.items) {
+    for (const it of items) {
       const p = it.product, q = it.qty, f = (p.unit === 'kom' ? q : q / 100);
       t.kcal += Number(p.kcal || 0) * f;
       t.protein += Number(p.protein || 0) * f;
       t.carbs += Number(p.carbs || 0) * f;
       t.fat += Number(p.fat || 0) * f;
     }
-    const sv = r.servings || 1;
+    const sv = servings;
     const calcMacroHtml = `${num(t.kcal / sv, 0)} kcal · P ${num(t.protein / sv)}g · UH ${num(t.carbs / sv)}g · M ${num(t.fat / sv)}g / porcija`;
 
     // Autorski makrosi ako postoje
@@ -1088,7 +1216,7 @@ function renderRecipes() {
       <div class="viewHead" style="margin-bottom:8px">
         <div>
           <div class="name" style="font-size:16px">${esc(r.name)}</div>
-          <div class="meta">${r.servings} porcija · ${r.items.length} sastojaka · <b>${eur(cost)}</b> (${eur(cost / r.servings)} / porciji)</div>
+          <div class="meta">${servings} porcija · ${items.length} sastojaka · <b>${eur(cost)}</b> (${eur(cost / servings)} / porciji)</div>
           <div class="macro" style="margin-top:2px">${calcMacroHtml}</div>
           ${authorMacroHtml}
         </div>
@@ -1098,7 +1226,7 @@ function renderRecipes() {
         </div>
       </div>
       <div class="recipeItems" style="font-size:12px;color:var(--muted)">
-        ${r.items.map(x => `${num(x.qty, 0)} ${esc(x.product.unit || 'g')} ${esc(x.product.name)}`).join(' · ')}
+        ${items.map(x => `${num(x.qty, 0)} ${esc(x.product.unit || 'g')} ${esc(x.product.name)}`).join(' · ')}
       </div>
       ${instructionsHtml}
     </div>`;
@@ -1146,7 +1274,9 @@ function calculateDayTotals() {
   let t = { kcal: 0, protein: 0, carbs: 0, fat: 0, price: 0 };
   for (const block of dayPlan.blocks || []) {
     for (const it of block.items || []) {
-      const p = it.product, q = Number(it.qty) || 0, f = (p.unit === 'kom' ? q : q / 100);
+      const p = resolveMealItemProduct(it);
+      it.product = p;
+      const q = Number(it.qty) || 0, f = (p.unit === 'kom' ? q : q / 100);
       t.kcal += Number(p.kcal || 0) * f;
       t.protein += Number(p.protein || 0) * f;
       t.carbs += Number(p.carbs || 0) * f;
@@ -1176,7 +1306,9 @@ function renderDayPlan() {
   $('#dayBlocks').innerHTML = (dayPlan.blocks || []).map((b, bi) => {
     let bt = { kcal: 0, protein: 0, carbs: 0, fat: 0, price: 0 };
     for (const it of b.items || []) {
-      const p = it.product, q = Number(it.qty) || 0, f = (p.unit === 'kom' ? q : q / 100);
+      const p = resolveMealItemProduct(it);
+      it.product = p;
+      const q = Number(it.qty) || 0, f = (p.unit === 'kom' ? q : q / 100);
       bt.kcal += Number(p.kcal || 0) * f;
       bt.protein += Number(p.protein || 0) * f;
       bt.carbs += Number(p.carbs || 0) * f;
@@ -1197,15 +1329,19 @@ function renderDayPlan() {
         </div>
       </div>
       <div>
-        ${(b.items || []).map((it, ii) => `
+        ${(b.items || []).map((it, ii) => {
+          const p = resolveMealItemProduct(it);
+          it.product = p;
+          return `
           <div style="display:grid;grid-template-columns:minmax(200px,1fr) 90px 40px 80px 30px;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #edf1f5;font-size:13px">
-            <div><b>${esc(it.product.name)}</b> <span class="meta">${esc(it.product.store || '')}</span></div>
+            <div><b>${esc(p.name)}</b> <span class="meta">${esc(p.store || '')}</span></div>
             <input class="dayQtyInput" data-bi="${bi}" data-ii="${ii}" type="number" min="0" step="any" value="${it.qty}" style="margin:0;padding:6px">
-            <div style="color:var(--muted)">${esc(it.product.unit || 'g')}</div>
-            <div class="right">${eur(itemCost(it.product, it.qty))}</div>
+            <div style="color:var(--muted)">${esc(p.unit || 'g')}</div>
+            <div class="right">${eur(itemCost(p, it.qty))}</div>
             <button class="danger removeDayItem" data-bi="${bi}" data-ii="${ii}" style="padding:4px 8px;font-size:12px">×</button>
           </div>
-        `).join('') || '<div class="sub" style="padding:8px 0">Blok je prazan. Dodaj recept gore desno.</div>'}
+        `;
+        }).join('') || '<div class="sub" style="padding:8px 0">Blok je prazan. Dodaj recept gore desno.</div>'}
       </div>
     </div>`;
   }).join('') || '<div class="card empty">Dnevni plan je prazan. Upiši npr. "Doručak" i dodaj blok.</div>';
@@ -1230,17 +1366,31 @@ async function saveDayPlan() {
 
 $('#addEmptyDayBlock').onclick = async () => {
   const name = ($('#dayBlockName').value || 'Obrok').trim();
-  dayPlan.blocks.push({ id: Date.now(), name, items: [] });
-  $('#dayBlockName').value = '';
-  await saveDayPlan();
-  renderDayPlan();
+  const block = { id: Date.now(), name, items: [] };
+  dayPlan.blocks.push(block);
+  try {
+    await saveDayPlan();
+    $('#dayBlockName').value = '';
+    renderDayPlan();
+  } catch (err) {
+    dayPlan.blocks.pop();
+    console.error('Add day block error:', err);
+    showToast('Dodavanje bloka nije uspjelo.');
+  }
 };
 
 $('#clearDayPlan').onclick = async () => {
   if (confirm('Očistiti sve obroke iz Dnevnog plana?')) {
+    const previousBlocks = dayPlan.blocks;
     dayPlan.blocks = [];
-    await saveDayPlan();
-    renderDayPlan();
+    try {
+      await saveDayPlan();
+      renderDayPlan();
+    } catch (err) {
+      dayPlan.blocks = previousBlocks;
+      console.error('Clear day plan error:', err);
+      showToast('Brisanje Dnevnog plana nije uspjelo.');
+    }
   }
 };
 
@@ -1252,39 +1402,73 @@ document.addEventListener('change', async e => {
     if (!r) return;
     const bi = Number(e.target.closest('.card').dataset.bi);
     const div = Math.max(1, r.servings || 1);
-    for (const it of r.items) {
+    const beforeLength = dayPlan.blocks[bi].items.length;
+    for (const it of r.items || []) {
+      const p = resolveMealItemProduct(it);
       dayPlan.blocks[bi].items.push({
-        productId: it.product.id,
-        product: it.product,
+        productId: p.id || it.productId || null,
+        product: { ...p },
         qty: (Number(it.qty) || 0) / div
       });
     }
-    await saveDayPlan();
-    renderDayPlan();
+    try {
+      await saveDayPlan();
+      renderDayPlan();
+    } catch (err) {
+      dayPlan.blocks[bi].items.splice(beforeLength);
+      console.error('Add recipe to day plan error:', err);
+      showToast('Dodavanje recepta u Dnevni plan nije uspjelo.');
+    }
   }
 });
 
-document.addEventListener('input', async e => {
+document.addEventListener('input', e => {
   if (e.target.classList.contains('dayQtyInput')) {
     const bi = Number(e.target.dataset.bi), ii = Number(e.target.dataset.ii);
-    dayPlan.blocks[bi].items[ii].qty = Math.max(0, Number(e.target.value || 0));
-    await saveDayPlan();
-    renderDayPlan();
+    const item = dayPlan.blocks?.[bi]?.items?.[ii];
+    if (!item) return;
+    item.qty = Math.max(0, Number(e.target.value || 0));
+    // Do not rebuild the whole day plan while the user is typing: replacing the
+    // input element steals focus and made multi-digit quantities feel "blocked".
+  }
+});
+
+document.addEventListener('change', async e => {
+  if (e.target.classList.contains('dayQtyInput')) {
+    try {
+      await saveDayPlan();
+      renderDayPlan();
+    } catch (err) {
+      console.error('Day quantity save error:', err);
+      showToast('Spremanje količine nije uspjelo.');
+    }
   }
 });
 
 document.addEventListener('click', async e => {
   if (e.target.classList.contains('removeBlock')) {
     const bi = Number(e.target.dataset.bi);
-    dayPlan.blocks.splice(bi, 1);
-    await saveDayPlan();
-    renderDayPlan();
+    const removed = dayPlan.blocks.splice(bi, 1)[0];
+    try {
+      await saveDayPlan();
+      renderDayPlan();
+    } catch (err) {
+      if (removed) dayPlan.blocks.splice(bi, 0, removed);
+      console.error('Remove day block error:', err);
+      showToast('Brisanje bloka nije uspjelo.');
+    }
   }
   if (e.target.classList.contains('removeDayItem')) {
     const bi = Number(e.target.dataset.bi), ii = Number(e.target.dataset.ii);
-    dayPlan.blocks[bi].items.splice(ii, 1);
-    await saveDayPlan();
-    renderDayPlan();
+    const removed = dayPlan.blocks[bi]?.items?.splice(ii, 1)[0];
+    try {
+      await saveDayPlan();
+      renderDayPlan();
+    } catch (err) {
+      if (removed && dayPlan.blocks[bi]) dayPlan.blocks[bi].items.splice(ii, 0, removed);
+      console.error('Remove day item error:', err);
+      showToast('Brisanje stavke nije uspjelo.');
+    }
   }
 });
 
@@ -1313,30 +1497,59 @@ function onMacroInput(type) {
   g.fat = +$('#goalFat').value || 0;
   if (s.kcalLocked) balanceMacros(type);
   else { g.kcal = Math.round(g.protein * 4 + g.carbs * 4 + g.fat * 9); $('#goalKcal').value = g.kcal; }
-  saveDayPlan();
-  renderDayPlan();
+}
+
+function persistMacroGoals() {
+  saveDayPlan()
+    .then(() => renderDayPlan())
+    .catch(err => {
+      console.error('Day plan save error:', err);
+      showToast('Nije uspjelo spremanje ciljeva.');
+    });
 }
 
 $('#goalProtein').oninput = () => onMacroInput('protein');
 $('#goalCarbs').oninput = () => onMacroInput('carbs');
 $('#goalFat').oninput = () => onMacroInput('fat');
+$('#goalProtein').onchange = persistMacroGoals;
+$('#goalCarbs').onchange = persistMacroGoals;
+$('#goalFat').onchange = persistMacroGoals;
 $('#goalKcal').oninput = () => {
-  if (!dayPlan.settings.kcalLocked) return;
+  if (!dayPlan.settings.kcalLocked) {
+    dayPlan.goals.kcal = +$('#goalKcal').value || 0;
+    return;
+  }
   dayPlan.goals.kcal = +$('#goalKcal').value || 0;
   balanceMacros('');
-  saveDayPlan();
-  renderDayPlan();
 };
-$('#lockKcal').onclick = () => {
-  dayPlan.settings.kcalLocked = !dayPlan.settings.kcalLocked;
-  saveDayPlan();
-  renderDayPlan();
+$('#goalKcal').onchange = persistMacroGoals;
+$('#lockKcal').onclick = async () => {
+  const previous = dayPlan.settings.kcalLocked;
+  dayPlan.settings.kcalLocked = !previous;
+  try {
+    await saveDayPlan();
+    renderDayPlan();
+  } catch (err) {
+    dayPlan.settings.kcalLocked = previous;
+    console.error('Kcal lock save error:', err);
+    showToast('Spremanje postavke kalorija nije uspjelo.');
+  }
 };
-$('#macroBalance').onchange = () => {
+$('#macroBalance').onchange = async () => {
+  const previous = dayPlan.settings.balance;
+  const previousGoals = { ...dayPlan.goals };
   dayPlan.settings.balance = $('#macroBalance').value;
   if (dayPlan.settings.kcalLocked) balanceMacros('');
-  saveDayPlan();
-  renderDayPlan();
+  try {
+    await saveDayPlan();
+    renderDayPlan();
+  } catch (err) {
+    dayPlan.settings.balance = previous;
+    dayPlan.goals = previousGoals;
+    console.error('Macro balance save error:', err);
+    showToast('Spremanje postavke makro balansa nije uspjelo.');
+    renderDayPlan();
+  }
 };
 
 // === SMART SHOPPING LIST ===
@@ -1346,8 +1559,10 @@ function generateShoppingList() {
 
   for (const b of dayPlan.blocks) {
     for (const it of b.items || []) {
-      const pid = it.product.id;
-      const cur = itemMap.get(pid) || { product: it.product, qty: 0 };
+      const p = resolveMealItemProduct(it);
+      it.product = p;
+      const pid = p.id || it.productId || `unlinked:${norm(p.name || 'item')}`;
+      const cur = itemMap.get(pid) || { product: p, qty: 0 };
       cur.qty += (Number(it.qty) || 0);
       itemMap.set(pid, cur);
     }
@@ -1356,14 +1571,38 @@ function generateShoppingList() {
   const storeGroups = new Map();
   for (const { product: p, qty: neededQty } of itemMap.values()) {
     if (neededQty <= 0) continue;
-    const storeName = p.store || 'Ostalo / Zaliha';
-    const packSize = Number(p.pack) || 100;
-    const packsNeeded = Math.ceil(neededQty / packSize);
-    const estCost = packsNeeded * (p.price || 0);
 
+    // Shopping list optimizes the actual basket cost, not only €/100 g.
+    // For an identical EAN, evaluate how many whole packs are needed from each
+    // current offer and choose the lowest total purchase cost.
+    const candidates = Array.isArray(p.offers) && p.offers.length ? p.offers : [p];
+    let bestPurchase = null;
+    for (const offer of candidates) {
+      const packSize = Number(offer.pack) || Number(p.pack) || 100;
+      const price = Number(offer.price);
+      if (!(packSize > 0) || !(price >= 0)) continue;
+      // neededQty and packSize use the same normalized unit. For "kom",
+      // packSize can be >1 (e.g. 10 eggs), so whole-package rounding applies too.
+      const packsNeeded = Math.ceil(neededQty / packSize);
+      const estCost = packsNeeded * price;
+      if (!bestPurchase || estCost < bestPurchase.estCost ||
+          (estCost === bestPurchase.estCost && getUnitValuePer100(offer) < getUnitValuePer100(bestPurchase.offer))) {
+        bestPurchase = { offer, packSize, packsNeeded, estCost };
+      }
+    }
+    if (!bestPurchase) continue;
+
+    const offer = bestPurchase.offer;
+    const storeName = offer.store || p.store || 'Ostalo / Zaliha';
     if (!storeGroups.has(storeName)) storeGroups.set(storeName, []);
     storeGroups.get(storeName).push({
-      name: p.name, neededQty, packSize, unit: p.unit || 'g', packsNeeded, pricePerPack: p.price, estCost
+      name: p.name,
+      neededQty,
+      packSize: bestPurchase.packSize,
+      unit: offer.unit || p.unit || 'g',
+      packsNeeded: bestPurchase.packsNeeded,
+      pricePerPack: Number(offer.price) || 0,
+      estCost: bestPurchase.estCost
     });
   }
   return storeGroups;
@@ -1445,7 +1684,10 @@ $('#copyShopList').onclick = () => {
 
   navigator.clipboard.writeText(text).then(() => {
     showToast('Popis za kupovinu je kopiran u međuspremnik!');
-  }).catch(() => alert('Kopiranje nije uspjelo. Označi ručno.'));
+  }).catch(err => {
+    console.error('Shopping list clipboard error:', err);
+    showToast('Kopiranje popisa nije uspjelo.');
+  });
 };
 
 // === SINKRONIZACIJA CIJENE.DEV ===
@@ -1520,10 +1762,15 @@ $('#syncStart').onclick = async () => {
       log(`Obrađujem ${CHAINS[chain]}…`);
       const prices = parseCsv(pr), best = new Map();
       for (let i = 1; i < prices.length; i++) {
-        const c = prices[i], pid = (c[1] || '').trim(), special = nval(c[6]), price = special ?? nval(c[2]);
-        if (!pid || !price) continue;
+        const c = prices[i], pid = (c[1] || '').trim();
+        const regular = nval(c[2]), special = nval(c[6]);
+        // A sale price is valid only when it is a positive amount. Zero/blank
+        // must not replace the regular price or mark an item as discounted.
+        const hasSpecial = Number.isFinite(special) && special > 0;
+        const price = hasSpecial ? special : regular;
+        if (!pid || !(price > 0)) continue;
         const prev = best.get(pid);
-        if (!prev || price < prev.price) best.set(pid, { price, ppu: nval(c[3]), sale: !!special });
+        if (!prev || price < prev.price) best.set(pid, { price, ppu: nval(c[3]), sale: hasSpecial });
       }
       const products = parseCsv(pt);
       for (let i = 1; i < products.length; i++) {
@@ -1539,18 +1786,58 @@ $('#syncStart').onclick = async () => {
       }
     }
 
+    if (!all.length) throw Error('U odabranim lancima nisu pronađeni valjani artikli. Postojeća baza nije promijenjena.');
     log(`Spremam ${all.length.toLocaleString('hr-HR')} artikala u bazu…`);
-    await dbClear('catalog');
-    await dbBulkPut('catalog', all, (n, t) => log(`Spremanje: ${n.toLocaleString('hr-HR')} / ${t.toLocaleString('hr-HR')}`));
+    // Clear + insert happen in one IndexedDB transaction. If any catalog write
+    // fails, the previous working catalog remains intact.
+    await dbReplaceStore('catalog', all, (n, t) => log(`Spremanje: ${n.toLocaleString('hr-HR')} / ${t.toLocaleString('hr-HR')}`));
 
-    // Osvježi cijene postojećih favorita
+    // Osvježi cijene postojećih favorita. EAN je kanonski identitet proizvoda:
+    // isti fizički proizvod iz više trgovina ostaje jedan favorit s više ponuda.
     const byId = new Map(all.map(p => [p.id, p]));
+    const byBarcode = new Map();
+    for (const p of all) {
+      const barcode = String(p.barcode || '').trim();
+      if (!barcode) continue;
+      if (!byBarcode.has(barcode)) byBarcode.set(barcode, []);
+      byBarcode.get(barcode).push(p);
+    }
     for (const f of favorites) {
-      const cur = byId.get(f.catalogId);
-      if (cur) {
-        Object.assign(f, { price: cur.price, store: cur.store, pack: cur.pack, unit: cur.unit });
-        await dbPut('favorites', f);
+      let offers = [];
+      const barcode = String(f.barcode || '').trim();
+      if (barcode && byBarcode.has(barcode)) offers = byBarcode.get(barcode);
+      else {
+        const cur = byId.get(f.catalogId);
+        if (cur) offers = [cur];
       }
+      if (!offers.length) continue;
+
+      offers.sort((a, b) => {
+        const ap = Number(a.price), bp = Number(b.price);
+        const aHas = Number.isFinite(ap) && ap > 0, bHas = Number.isFinite(bp) && bp > 0;
+        if (aHas && bHas && ap !== bp) return ap - bp;
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        return getUnitValuePer100(a) - getUnitValuePer100(b);
+      });
+      const best = offers[0];
+      Object.assign(f, {
+        catalogId: best.id,
+        barcode: best.barcode || f.barcode || '',
+        name: best.name || f.name,
+        brand: best.brand || f.brand || '',
+        price: best.price,
+        store: best.store,
+        pack: best.pack,
+        unit: best.unit,
+        pricePer100: best.pricePer100,
+        onSale: best.onSale,
+        offers: offers.map(o => ({
+          id: o.id, store: o.store, price: o.price, pack: o.pack, unit: o.unit,
+          pricePer100: o.pricePer100, onSale: o.onSale
+        }))
+      });
+      await dbPut('favorites', f);
+      await propagateProductUpdate(f);
     }
 
     await dbPut('meta', { key: 'sync', date: latest.date, count: all.length, syncedAt: new Date().toISOString() });
@@ -1987,12 +2274,17 @@ $('#igSaveBtn').onclick = async () => {
     savedAt: new Date().toISOString()
   };
 
-  await dbPut('recipes', r);
-  recipes = await dbAll('recipes');
-  renderRecipes();
-  $('#recipeCount').textContent = `(${recipes.length})`;
-  showToast(`Recept "${title}" je uspješno spremljen s uputama i makrosima!`);
-  $('#tabs button[data-tab="recipes"]').click();
+  try {
+    await dbPut('recipes', r);
+    recipes = await dbAll('recipes');
+    renderRecipes();
+    $('#recipeCount').textContent = `(${recipes.length})`;
+    showToast(`Recept "${title}" je uspješno spremljen s uputama i makrosima!`);
+    $('#tabs button[data-tab="recipes"]').click();
+  } catch (err) {
+    console.error('Instagram recipe save error:', err);
+    showToast('Spremanje uvezenog recepta nije uspjelo.');
+  }
 };
 
 $('#igOpenInCreatorBtn').onclick = async () => {
@@ -2013,22 +2305,28 @@ $('#igOpenInCreatorBtn').onclick = async () => {
 
 // === BACKUP (IMPORT / EXPORT JSON) ===
 $('#exportBackupBtn').onclick = async () => {
-  const payload = {
-    format: 'CijeneMealProBackupV2',
-    exportedAt: new Date().toISOString(),
-    favorites: await dbAll('favorites'),
-    custom: await dbAll('custom'),
-    recipes: await dbAll('recipes'),
-    dayPlan
-  };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `cijenemeal-pro-backup-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  $('#backupStatus').textContent = '✓ Backup datoteka je uspješno preuzeta.';
+  try {
+    const payload = {
+      format: 'CijeneMealProBackupV2',
+      exportedAt: new Date().toISOString(),
+      favorites: await dbAll('favorites'),
+      custom: await dbAll('custom'),
+      recipes: await dbAll('recipes'),
+      dayPlan
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cijenemeal-pro-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    $('#backupStatus').textContent = '✓ Backup datoteka je uspješno preuzeta.';
+  } catch (err) {
+    console.error('Backup export error:', err);
+    $('#backupStatus').textContent = 'Greška pri izradi backupa.';
+    showToast('Izrada backup datoteke nije uspjela.');
+  }
 };
 
 $('#importBackupBtn').onclick = () => $('#backupFileInput').click();
@@ -2037,20 +2335,30 @@ $('#backupFileInput').onchange = async e => {
   if (!f) return;
   try {
     const data = JSON.parse(await f.text());
-    if (!data.favorites || !data.recipes) throw Error('Neispravan format backup datoteke.');
+    if (!data || !Array.isArray(data.favorites) || !Array.isArray(data.recipes) || (data.custom != null && !Array.isArray(data.custom))) {
+      throw Error('Neispravan format backup datoteke.');
+    }
+    const validRecord = x => x && typeof x === 'object' && !Array.isArray(x) && x.id != null;
+    if (!data.favorites.every(validRecord) || !(data.custom || []).every(validRecord) || !data.recipes.every(validRecord)) {
+      throw Error('Backup sadrži neispravne zapise.');
+    }
     if (!confirm(`Učitavanjem backupa zamijenit će se osobni favoriti (${data.favorites.length}) i recepti (${data.recipes.length}). Nastaviti?`)) return;
 
-    await dbClear('favorites');
-    await dbClear('custom');
-    await dbClear('recipes');
+    // Validate the full payload before destructive clears. A malformed backup must
+    // never erase working local data before we discover the problem.
+    const incomingFavorites = structuredClone(data.favorites);
+    const incomingCustom = structuredClone(data.custom || []);
+    const incomingRecipes = structuredClone(data.recipes);
 
-    for (const item of data.favorites) await dbPut('favorites', item);
-    for (const item of data.custom || []) await dbPut('custom', item);
-    for (const item of data.recipes) await dbPut('recipes', item);
-    if (data.dayPlan) {
-      dayPlan = data.dayPlan;
-      await saveDayPlan();
-    }
+    // One IndexedDB transaction: personal stores and Day Plan are restored
+    // together, so a failed import cannot leave a half-restored backup.
+    const incomingDayPlan = data.dayPlan ? structuredClone(data.dayPlan) : undefined;
+    await dbRestorePersonalData({
+      favorites: incomingFavorites,
+      custom: incomingCustom,
+      recipes: incomingRecipes
+    }, incomingDayPlan);
+    if (incomingDayPlan !== undefined) dayPlan = incomingDayPlan;
     await loadAll();
     $('#backupStatus').textContent = '✓ Backup je uspješno vraćen!';
     showToast('Podaci su uspješno vraćeni!');
@@ -2062,7 +2370,12 @@ $('#backupFileInput').onchange = async e => {
 };
 
 // Initial Start
-loadAll().catch(e => console.error('Start error:', e));
+loadAll().catch(e => {
+  console.error('Start error:', e);
+  const syncState = $('#syncState');
+  if (syncState) syncState.textContent = 'Greška pri učitavanju lokalnih podataka. Osvježi aplikaciju i pokušaj ponovno.';
+  showToast('MealPro nije uspio učitati sve lokalne podatke.');
+});
 
 
 let manualZipBuffer = null;

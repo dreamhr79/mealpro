@@ -44,6 +44,24 @@ async function dbBulkPut(store,rows,onProgress){
   await new Promise(r=>setTimeout(r,0));
  }
 }
+async function dbReplaceStore(store,rows,onProgress){
+ const d=await openDB();
+ return new Promise((res,rej)=>{
+  const tx=d.transaction(store,'readwrite'),os=tx.objectStore(store);
+  os.clear();
+  let done=0;
+  for(const row of rows||[]){
+   const req=os.put(row);
+   req.onsuccess=()=>{
+    done++;
+    if(done%1500===0||done===rows.length)onProgress?.(done,rows.length);
+   };
+  }
+  tx.oncomplete=()=>res();
+  tx.onerror=()=>rej(tx.error||Error('Transakcija zamjene baze nije uspjela.'));
+  tx.onabort=()=>rej(tx.error||Error('Transakcija zamjene baze je prekinuta.'));
+ });
+}
 async function dbSearchCatalog(q,limit=80){
  const words=norm(q).split(/\s+/).filter(Boolean);
  if(!words.length)return [];
@@ -66,7 +84,7 @@ async function dbSearchCatalog(q,limit=80){
    }
    rows.push(c.value);c.continue();
   };
-  req.onerror=()=>rej(r.error);
+  req.onerror=()=>rej(req.error || Error('Greška pri pretraživanju kataloga.'));
  });
 }
 
@@ -78,5 +96,43 @@ async function dbGetOffersByBarcode(barcode){
   const req = d.transaction('catalog').objectStore('catalog').index('barcode').getAll(IDBKeyRange.only(code));
   req.onsuccess = () => res(req.result || []);
   req.onerror = () => res([]);
+ });
+}
+
+
+async function dbReplaceStores(dataByStore){
+ const entries=Object.entries(dataByStore||{});
+ if(!entries.length)return;
+ const d=await openDB();
+ return new Promise((res,rej)=>{
+  const tx=d.transaction(entries.map(([store])=>store),'readwrite');
+  for(const [store,rows] of entries){
+   const os=tx.objectStore(store);
+   os.clear();
+   for(const row of rows||[])os.put(row);
+  }
+  tx.oncomplete=()=>res();
+  tx.onerror=()=>rej(tx.error||Error('Transakcija zamjene podataka nije uspjela.'));
+  tx.onabort=()=>rej(tx.error||Error('Transakcija zamjene podataka je prekinuta.'));
+ });
+}
+
+async function dbRestorePersonalData(dataByStore,dayPlanValue){
+ const entries=Object.entries(dataByStore||{});
+ const stores=[...entries.map(([store])=>store),'meta'];
+ const d=await openDB();
+ return new Promise((res,rej)=>{
+  const tx=d.transaction([...new Set(stores)],'readwrite');
+  for(const [store,rows] of entries){
+   const os=tx.objectStore(store);
+   os.clear();
+   for(const row of rows||[])os.put(row);
+  }
+  if(dayPlanValue!==undefined){
+   tx.objectStore('meta').put({key:'dayPlan',val:dayPlanValue});
+  }
+  tx.oncomplete=()=>res();
+  tx.onerror=()=>rej(tx.error||Error('Vraćanje backupa nije uspjelo.'));
+  tx.onabort=()=>rej(tx.error||Error('Vraćanje backupa je prekinuto.'));
  });
 }
