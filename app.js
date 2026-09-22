@@ -1825,51 +1825,43 @@ $('#syncStart').onclick = async () => {
     }
 
     if (!all.length) throw Error('U odabranim lancima nisu pronađeni valjani artikli. Postojeća baza nije promijenjena.');
-    log(`Spremam ${all.length.toLocaleString('hr-HR')} artikala u bazu…`);
-    // Clear + insert happen in one IndexedDB transaction. If any catalog write
-    // fails, the previous working catalog remains intact.
-    await dbReplaceStore('catalog', all, (n, t) => log(`Spremanje: ${n.toLocaleString('hr-HR')} / ${t.toLocaleString('hr-HR')}`));
-
-    // Normalized model: one canonical product, current offers only, and a
-    // compact price history row only when an offer price/sale state changes.
+    // Build the normalized model directly. We no longer persist the raw
+    // per-store catalog, avoiding a duplicate copy of the same cijene.dev data.
     const normalized = buildNormalizedCatalogModel(all);
+    log(`Spremam ${normalized.products.length.toLocaleString('hr-HR')} proizvoda i ${normalized.offers.length.toLocaleString('hr-HR')} aktualnih ponuda…`);
     const syncStamp = new Date().toISOString();
     const modelStats = await dbSyncCatalogModel(normalized.products, normalized.offers, syncStamp);
     const prunedHistory = await dbPrunePriceHistory(30);
     log(`Model: ${modelStats.products.toLocaleString('hr-HR')} proizvoda · ${modelStats.offers.toLocaleString('hr-HR')} aktualnih ponuda · ${modelStats.priceChanges.toLocaleString('hr-HR')} promjena cijene`);
     if (prunedHistory) log(`Povijest cijena: uklonjeno ${prunedHistory.toLocaleString('hr-HR')} zastarjelih zapisa (zadržano najviše 30 promjena po ponudi).`);
 
-    // Osvježi cijene postojećih favorita. EAN je kanonski identitet proizvoda:
-    // isti fizički proizvod iz više trgovina ostaje jedan favorit s više ponuda.
-    const byId = new Map(all.map(p => [p.id, p]));
-    const byBarcode = new Map();
-    for (const p of all) {
-      const barcode = String(p.barcode || '').trim();
-      if (!barcode) continue;
-      if (!byBarcode.has(barcode)) byBarcode.set(barcode, []);
-      byBarcode.get(barcode).push(p);
+    // Refresh favorites from the normalized in-memory model without rebuilding
+    // a second raw catalog copy.
+    const productByKey = new Map(normalized.products.map(p => [p.id, p]));
+    const offersByKey = new Map();
+    for (const offer of normalized.offers) {
+      if (!offersByKey.has(offer.productKey)) offersByKey.set(offer.productKey, []);
+      offersByKey.get(offer.productKey).push(offer);
     }
     for (const f of favorites) {
-      let offers = [];
-      const barcode = String(f.barcode || '').trim();
-      if (barcode && byBarcode.has(barcode)) offers = byBarcode.get(barcode);
-      else {
-        const cur = byId.get(f.catalogId);
-        if (cur) offers = [cur];
-      }
-      if (!offers.length) continue;
-
+      const productKey = f.id?.startsWith('ean:') || f.id?.startsWith('catalog:')
+        ? f.id
+        : (normalizeBarcode(f.barcode) ? `ean:${normalizeBarcode(f.barcode)}` : '');
+      if (!productKey) continue;
+      const product = productByKey.get(productKey);
+      let offers = offersByKey.get(productKey) || [];
+      if (!product || !offers.length) continue;
       offers = sortOffersByPrice(offers);
       const best = offers[0];
       Object.assign(f, {
         catalogId: best.id,
-        barcode: best.barcode || f.barcode || '',
-        name: best.name || f.name,
-        brand: best.brand || f.brand || '',
+        barcode: product.barcode || f.barcode || '',
+        name: product.name || f.name,
+        brand: product.brand || f.brand || '',
         price: best.price,
         store: best.store,
-        pack: best.pack,
-        unit: best.unit,
+        pack: product.pack || best.pack,
+        unit: product.unit || best.unit,
         pricePer100: best.pricePer100,
         onSale: best.onSale,
         offers: favoriteOfferSnapshot(offers)
