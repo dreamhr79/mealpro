@@ -2,7 +2,7 @@ name: Deploy MealPro Test
 
 on:
   push:
-    branches: [feat/recipes-phase-6]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
