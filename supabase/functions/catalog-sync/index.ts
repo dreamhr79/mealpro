@@ -1,4 +1,4 @@
-import { readZipFiles } from "./zip.ts";
+import { listRemoteZip, readRemoteZipText } from "./zip.ts";
 import { parseChain, normalizeRows } from "./normalize.ts";
 
 const corsHeaders = {
@@ -94,51 +94,48 @@ Deno.serve(async (req) => {
     if (!archive?.url) throw new Error("No valid cijene.dev archive");
     syncId = await createSync(archive);
 
-    // The archive download is deliberately performed server-side. Parsing and
-    // normalization are the next isolated step; clients never receive the ZIP.
-    const zipRes = await fetch(archive.url);
-    if (!zipRes.ok) throw new Error(`Archive download failed: ${zipRes.status}`);
-    const buffer = await zipRes.arrayBuffer();
-    if (!buffer.byteLength) throw new Error("Downloaded archive is empty");
-
     const allowedChains = ["konzum","lidl","spar","plodine","tommy","eurospin","kaufland","studenac","ktc","metro","ribola","ntl"];
-    const requested = Array.isArray(requestBody?.chains) ? body.chains.map((x:unknown) => String(x).toLowerCase()) : [];
+    const requested = Array.isArray(requestBody?.chains) ? requestBody.chains.map((x:unknown) => String(x).toLowerCase()) : [];
     const chains = (requested.length ? requested : ["konzum","lidl","spar","plodine","tommy","kaufland"])
       .filter((x:string, i:number, a:string[]) => allowedChains.includes(x) && a.indexOf(x) === i);
     if (!chains.length) throw new Error("No supported chains selected");
 
-    // Only inflate files for selected chains. This keeps the worker footprint
-    // bounded and lets MealPro intentionally maintain a focused Croatian catalog.
-    const files = await readZipFiles(buffer, name => chains.some(chain =>
-      name === `${chain}/products.csv` || name === `${chain}/prices.csv`
-    ));
-    const rows = [];
-    const missingChains = [];
-    for (const chain of chains) {
-      const products = files[`${chain}/products.csv`];
-      const prices = files[`${chain}/prices.csv`];
-      if (!products || !prices) { missingChains.push(chain); continue; }
-      rows.push(...parseChain(chain, products, prices));
-      // Release inflated CSV strings before moving to the next normalization step.
-      delete files[`${chain}/products.csv`];
-      delete files[`${chain}/prices.csv`];
-    }
-    if (!rows.length) throw new Error("Archive contains no valid catalog rows");
-    if (missingChains.length) throw new Error("Incomplete archive; missing chains: " + missingChains.join(", "));
-
-    const model = normalizeRows(rows);
-    if (!model.products.length || !model.offers.length) throw new Error("Normalization produced an empty catalog");
-    if (model.offers.some(o => !o.product_id || !(Number(o.price) > 0))) throw new Error("Normalization produced invalid offers");
-
+    // Read only the ZIP directory first, then download/inflate one chain at a time.
+    // This avoids holding the complete cijene.dev archive and all CSV files in worker RAM.
+    const archiveIndex = await listRemoteZip(archive.url);
+    const missingChains:string[] = [];
+    let productCount = 0, offerCount = 0;
     await clearStage();
-    const batchSize = 1000;
-    for (let i=0;i<model.products.length;i+=batchSize) await stageRows("catalog_products_stage", model.products.slice(i,i+batchSize));
-    for (let i=0;i<model.offers.length;i+=batchSize) await stageRows("catalog_offers_stage", model.offers.slice(i,i+batchSize));
+    const batchSize = 500;
+
+    for (const chain of chains) {
+      const productEntry = archiveIndex.entries.get(`${chain}/products.csv`);
+      const priceEntry = archiveIndex.entries.get(`${chain}/prices.csv`);
+      if (!productEntry || !priceEntry) { missingChains.push(chain); continue; }
+
+      let productsText = await readRemoteZipText(archive.url, productEntry);
+      let pricesText = await readRemoteZipText(archive.url, priceEntry);
+      const rows = parseChain(chain, productsText, pricesText);
+      productsText = ""; pricesText = "";
+      const model = normalizeRows(rows);
+      rows.length = 0;
+
+      if (!model.products.length || !model.offers.length) throw new Error(`Normalization produced an empty catalog for ${chain}`);
+      if (model.offers.some(o => !o.product_id || !(Number(o.price) > 0))) throw new Error(`Normalization produced invalid offers for ${chain}`);
+
+      for (let i=0;i<model.products.length;i+=batchSize) await stageRows("catalog_products_stage", model.products.slice(i,i+batchSize));
+      for (let i=0;i<model.offers.length;i+=batchSize) await stageRows("catalog_offers_stage", model.offers.slice(i,i+batchSize));
+      productCount += model.products.length;
+      offerCount += model.offers.length;
+    }
+    if (missingChains.length) throw new Error("Incomplete archive; missing chains: " + missingChains.join(", "));
+    if (!productCount || !offerCount) throw new Error("Archive contains no valid catalog rows");
+
     const applied = await applyStage(syncId!);
 
     return Response.json({
       ok:true, syncId, archiveDate:archive.date || null, archiveUrl:archive.url,
-      archiveBytes:buffer.byteLength, chains, products:model.products.length, offers:model.offers.length,
+      archiveBytes:archiveIndex.size, chains, products:productCount, offers:offerCount,
       applied, stage:"published"
     }, { headers:corsHeaders });
   } catch (error) {
