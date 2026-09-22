@@ -116,3 +116,23 @@ async function dbReplaceStores(dataByStore){
   tx.onabort=()=>rej(tx.error||Error('Transakcija zamjene podataka je prekinuta.'));
  });
 }
+
+async function dbRestorePersonalData(dataByStore,dayPlanValue){
+ const entries=Object.entries(dataByStore||{});
+ const stores=[...entries.map(([store])=>store),'meta'];
+ const d=await openDB();
+ return new Promise((res,rej)=>{
+  const tx=d.transaction([...new Set(stores)],'readwrite');
+  for(const [store,rows] of entries){
+   const os=tx.objectStore(store);
+   os.clear();
+   for(const row of rows||[])os.put(row);
+  }
+  if(dayPlanValue!==undefined){
+   tx.objectStore('meta').put({key:'dayPlan',val:dayPlanValue});
+  }
+  tx.oncomplete=()=>res();
+  tx.onerror=()=>rej(tx.error||Error('Vraćanje backupa nije uspjelo.'));
+  tx.onabort=()=>rej(tx.error||Error('Vraćanje backupa je prekinuto.'));
+ });
+}
