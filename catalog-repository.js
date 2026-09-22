@@ -12,6 +12,12 @@ const CatalogRepository = (() => {
     return typeof navigator === 'undefined' || navigator.onLine !== false;
   }
 
+  function configure() {
+    const adapter = globalThis.SupabaseCatalogAdapter?.create?.(globalThis.MEALPRO_CONFIG || {});
+    setRemote(adapter);
+    return !!adapter;
+  }
+
   async function search(q, limit = 80) {
     if (remote && isOnline()) {
       try {
@@ -36,5 +42,7 @@ const CatalogRepository = (() => {
     return dbGetProductWithOffers(productKey);
   }
 
-  return { setRemote, search, getProduct, isOnline };
+  return { setRemote, configure, search, getProduct, isOnline };
 })();
+
+CatalogRepository.configure();
