@@ -264,11 +264,14 @@ function resolveMealItemProduct(it) {
   const snapshot = it.product && typeof it.product === 'object' ? it.product : null;
   const productId = it.productId != null ? String(it.productId) : '';
   const barcode = normalizeBarcode(snapshot?.barcode || it.barcode);
+  const snapshotOfferIds = new Set(Array.isArray(snapshot?.offers) ? snapshot.offers.map(o => String(o.id)) : []);
 
   // Always prefer the current persisted product over the recipe/day-plan snapshot.
   // This keeps prices and macros live after a favorite is refreshed by catalog sync.
   let p = favorites.find(f =>
     (productId && (String(f.id) === productId || String(f.catalogId) === productId)) ||
+    (productId && Array.isArray(f.offers) && f.offers.some(o => String(o.id) === productId)) ||
+    (f.catalogId && snapshotOfferIds.has(String(f.catalogId))) ||
     (barcode && normalizeBarcode(f.barcode) === barcode)
   ) || custom.find(c =>
     (productId && String(c.id) === productId) ||
