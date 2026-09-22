@@ -802,6 +802,7 @@ document.addEventListener('click', async e => {
     }
   }
   if (b.classList.contains('loadRecipe')) loadRecipe(b.dataset.id);
+  if (b.classList.contains('recipeDayPlan')) await addRecipeToDayPlan(b.dataset.id, 1);
   if (b.classList.contains('recipeScale')) loadScaledRecipe(b.dataset.id, b.dataset.servings);
   if (b.classList.contains('recipeScaleCustom')) {
     const input = b.closest('.recipeServingCustom')?.querySelector('.recipeServingInput');
@@ -1485,6 +1486,7 @@ function renderRecipes() {
           <button class="secondary recipeScale" data-id="${r.id}" data-servings="2">2 porcije</button>
           <button class="secondary recipeScale" data-id="${r.id}" data-servings="4">4 porcije</button>
           <span class="recipeServingCustom"><input class="recipeServingInput" data-id="${r.id}" type="number" min="1" step="1" inputmode="numeric" value="${servings}" aria-label="Broj porcija"><button class="secondary recipeScaleCustom" data-id="${r.id}">Skaliraj</button></span>
+          <button class="secondary recipeDayPlan" data-id="${r.id}">+ Dnevni plan</button>
           <button class="danger deleteRecipe" data-id="${r.id}">Obriši</button>
         </div>
       </div>
@@ -1540,6 +1542,28 @@ function loadScaledRecipe(rid, targetServings) {
   activateTab('creator');
   renderMeal();
   showToast(`Recept skaliran na ${target} ${servingLabel(target, true)}.`);
+}
+
+async function addRecipeToDayPlan(recipeId, targetServings = 1) {
+  const recipe = recipes.find(x => x.id === recipeId);
+  if (!recipe) return;
+  if (!dayPlan.blocks?.length) {
+    activateTab('dayplan');
+    showToast('Prvo dodaj blok obroka u Dnevnom planu.');
+    return;
+  }
+  const block = dayPlan.blocks[0];
+  const before = structuredClone(block.items || []);
+  block.items = [...(block.items || []), ...recipeItemsForServings(recipe, targetServings)];
+  try {
+    await saveDayPlan();
+    renderDayPlan();
+    showToast(`Dodano u "${block.name || 'Dnevni plan'}": ${recipe.name}`);
+  } catch (err) {
+    block.items = before;
+    console.error('Recipe to day plan error:', err);
+    showToast('Dodavanje recepta u Dnevni plan nije uspjelo.');
+  }
 }
 
 function loadRecipe(rid) {
