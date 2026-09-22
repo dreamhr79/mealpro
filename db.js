@@ -233,3 +233,30 @@ async function dbSyncCatalogModel(products,offers,syncedAt){
   tx.onabort=()=>rej(tx.error||Error('Sinkronizacija modela proizvoda i cijena je prekinuta.'));
  });
 }
+
+
+async function dbPrunePriceHistory(maxPerOffer=30){
+ const rows=await dbAll('priceHistory');
+ if(rows.length<=maxPerOffer)return 0;
+ const groups=new Map();
+ for(const row of rows){
+  const key=row.offerId||row.productKey||'unknown';
+  if(!groups.has(key))groups.set(key,[]);
+  groups.get(key).push(row);
+ }
+ const remove=[];
+ for(const group of groups.values()){
+  group.sort((a,b)=>String(b.recordedAt||'').localeCompare(String(a.recordedAt||'')) || Number(b.id||0)-Number(a.id||0));
+  remove.push(...group.slice(maxPerOffer));
+ }
+ if(!remove.length)return 0;
+ const d=await openDB();
+ await new Promise((res,rej)=>{
+  const tx=d.transaction('priceHistory','readwrite'),os=tx.objectStore('priceHistory');
+  for(const row of remove)os.delete(row.id);
+  tx.oncomplete=res;
+  tx.onerror=()=>rej(tx.error||Error('Čišćenje povijesti cijena nije uspjelo.'));
+  tx.onabort=()=>rej(tx.error||Error('Čišćenje povijesti cijena je prekinuto.'));
+ });
+ return remove.length;
+}
