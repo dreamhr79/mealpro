@@ -125,14 +125,20 @@ function calcSmartPack(rawQty, rawUnit, name, price = 0, ppu = 0) {
 
 function resolveMealItemProduct(it) {
   if (!it) return { id: id(), name: 'Nepoznato', pack: 100, unit: 'g', price: 0, kcal: 0, protein: 0, carbs: 0, fat: 0 };
-  let p = it.product;
-  if (!p && it.productId != null) {
-    // Catalog is intentionally not kept in a global in-memory array. Older recipes may
-    // only contain productId, so resolve against persisted user products and gracefully
-    // fall back to the snapshot data below instead of throwing on an undefined `products`.
-    p = favorites.find(f => String(f.id) === String(it.productId) || String(f.catalogId) === String(it.productId))
-     || custom.find(c => String(c.id) === String(it.productId));
-  }
+  const snapshot = it.product && typeof it.product === 'object' ? it.product : null;
+  const productId = it.productId != null ? String(it.productId) : '';
+  const barcode = String(snapshot?.barcode || it.barcode || '').trim();
+
+  // Always prefer the current persisted product over the recipe/day-plan snapshot.
+  // This keeps prices and macros live after a favorite is refreshed by catalog sync.
+  let p = favorites.find(f =>
+    (productId && (String(f.id) === productId || String(f.catalogId) === productId)) ||
+    (barcode && String(f.barcode || '') === barcode)
+  ) || custom.find(c =>
+    (productId && String(c.id) === productId) ||
+    (barcode && String(c.barcode || '') === barcode)
+  ) || snapshot;
+
   if (!p) {
     p = it.product || {
       id: 'unlinked:' + id(),
