@@ -333,3 +333,21 @@ main {
   .viewHead>button,.viewHead>div+button{width:100%;margin-top:10px}
   .productRow{padding:12px 4px}
 }
+
+/* Phase 5: mobile meal creator */
+@media(max-width:760px){
+  .mealIng{
+    grid-template-columns:minmax(0,1fr) auto 38px;
+    grid-template-areas:
+      "info qty remove"
+      "info cost remove";
+    gap:6px 8px;
+    padding:12px 0;
+  }
+  .mealIng>div:first-child{grid-area:info;min-width:0}
+  .mealIng>.qtyControl{grid-area:qty;width:116px}
+  .mealIng>.rowCost{grid-area:cost;text-align:right!important;font-size:12px!important}
+  .mealIng>.danger{grid-area:remove;align-self:stretch;padding:6px}
+  .mealIng>div:nth-child(3){display:none}
+  .mealIng .macro{font-size:11px;line-height:1.35}
+}
