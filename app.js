@@ -770,11 +770,15 @@ async function favoriteFromCatalog(cid) {
     }
   }
 
-  // Poredaj ponude po isplativosti (€ / 100g) pa po cijeni
+  // Isti EAN predstavlja isti fizički proizvod/pakiranje, pa je za favorita
+  // relevantna najniža cijena pakiranja. €/100 g ostaje informativna metrika
+  // za usporedbu različitih proizvoda i veličina pakiranja.
   allOffers.sort((a, b) => {
-    const va = getUnitValuePer100(a), vb = getUnitValuePer100(b);
-    if (Number.isFinite(va) && Number.isFinite(vb) && va !== vb) return va - vb;
-    return (Number(a.price) || 0) - (Number(b.price) || 0);
+    const ap = Number(a.price), bp = Number(b.price);
+    const aHas = Number.isFinite(ap) && ap > 0, bHas = Number.isFinite(bp) && bp > 0;
+    if (aHas && bHas && ap !== bp) return ap - bp;
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    return getUnitValuePer100(a) - getUnitValuePer100(b);
   });
 
   const bestOffer = allOffers[0];
@@ -1667,11 +1671,11 @@ $('#syncStart').onclick = async () => {
       if (!offers.length) continue;
 
       offers.sort((a, b) => {
-        const av = Number(a.pricePer100), bv = Number(b.pricePer100);
-        const aHas = Number.isFinite(av) && av > 0, bHas = Number.isFinite(bv) && bv > 0;
-        if (aHas && bHas && av !== bv) return av - bv;
+        const ap = Number(a.price), bp = Number(b.price);
+        const aHas = Number.isFinite(ap) && ap > 0, bHas = Number.isFinite(bp) && bp > 0;
+        if (aHas && bHas && ap !== bp) return ap - bp;
         if (aHas !== bHas) return aHas ? -1 : 1;
-        return (Number(a.price) || Infinity) - (Number(b.price) || Infinity);
+        return getUnitValuePer100(a) - getUnitValuePer100(b);
       });
       const best = offers[0];
       Object.assign(f, {
