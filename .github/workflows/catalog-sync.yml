@@ -17,20 +17,15 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Trigger Supabase catalog sync
+      - uses: actions/checkout@v4
+      - name: Import cijene.dev catalog
         env:
           CATALOG_SYNC_URL: ${{ secrets.CATALOG_SYNC_URL }}
           CATALOG_SYNC_TOKEN: ${{ secrets.CATALOG_SYNC_TOKEN }}
-          REQUESTED_CHAINS: ${{ github.event.inputs.chains }}
+          CHAINS: ${{ github.event.inputs.chains || 'konzum,lidl,spar,plodine,tommy,kaufland' }}
         run: |
           test -n "$CATALOG_SYNC_URL"
           test -n "$CATALOG_SYNC_TOKEN"
-          CHAINS="${REQUESTED_CHAINS:-konzum,lidl,spar,plodine,tommy,kaufland}"
-          export CHAINS
-          PAYLOAD=$(python3 -c 'import json,os; print(json.dumps({"chains":[x.strip() for x in os.environ["CHAINS"].split(",") if x.strip()]}))')
-          curl --fail-with-body --retry 2 --max-time 900 \
-            -X POST "$CATALOG_SYNC_URL" \
-            -H "Authorization: Bearer $CATALOG_SYNC_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD"
+          python3 scripts/catalog_sync.py
