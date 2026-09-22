@@ -1382,15 +1382,42 @@ function preferredRecipeProduct(item) {
   return { product: resolveMealItemProduct(item), source: snapshot?.catalogId || snapshot?.barcode ? 'Baza' : 'Spremljeno' };
 }
 
+function recipeProductKind(p) {
+  const n = norm(`${p?.name || ''} ${p?.brand || ''}`);
+  const kinds = [
+    ['greek-yogurt', /(grcki|greek).*jogurt|jogurt.*(grcki|greek)/],
+    ['skyr', /\bskyr\b/],
+    ['yogurt', /jogurt/],
+    ['cottage', /(cottage|zrnati|svjezi sir)/],
+    ['chicken-breast', /(pilec|pilet).*?(prsa|file|filet)/],
+    ['turkey-breast', /(purec|puret).*?(prsa|file|filet)/],
+    ['tuna', /\btun(a|e|u)\b/],
+    ['salmon', /losos/],
+    ['whey', /\bwhey\b|protein sirutke/],
+    ['casein', /casein|kazein/],
+    ['eggs', /\bjaj/],
+    ['oats', /zoben|oat/],
+    ['rice', /\briz|rice/],
+    ['pasta', /tjesten|pasta/],
+    ['bread', /kruh|toast/]
+  ];
+  return kinds.find(([, rx]) => rx.test(n))?.[0] || '';
+}
+
 function comparableRecipeProduct(a, b) {
   if (!a || !b) return false;
   const aUnit = String(a.unit || ''), bUnit = String(b.unit || '');
   if (aUnit !== bUnit) return false;
+  const ak = recipeProductKind(a), bk = recipeProductKind(b);
+  if (ak || bk) return !!ak && ak === bk;
   const aCategory = getFavoriteCategory(a), bCategory = getFavoriteCategory(b);
-  if (aCategory !== 'Ostalo' && aCategory === bCategory) return true;
-  const aWords = new Set(tokens(`${a.name || ''} ${a.brand || ''}`));
-  const bWords = tokens(`${b.name || ''} ${b.brand || ''}`);
-  return bWords.some(w => w.length >= 4 && aWords.has(w));
+  if (aCategory !== 'Ostalo' && aCategory === bCategory) {
+    const aWords = new Set(tokens(a.name || '').filter(w => w.length >= 4));
+    const bWords = tokens(b.name || '').filter(w => w.length >= 4);
+    return bWords.some(w => aWords.has(w));
+  }
+  const aWords = new Set(tokens(`${a.name || ''} ${a.brand || ''}`).filter(w => w.length >= 4));
+  return tokens(`${b.name || ''} ${b.brand || ''}`).some(w => w.length >= 4 && aWords.has(w));
 }
 
 function cheaperRecipeAlternative(product) {
