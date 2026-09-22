@@ -28,6 +28,6 @@ jobs:
         run: test -n "$SUPABASE_ACCESS_TOKEN"
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.45.5
       - name: Deploy catalog-sync
         run: supabase functions deploy catalog-sync --use-api --project-ref "$SUPABASE_PROJECT_ID"
