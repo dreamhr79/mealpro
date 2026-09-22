@@ -1,6 +1,12 @@
 name: Daily catalog sync
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/catalog_sync.py'
+      - 'supabase/functions/catalog-sync/**'
+      - '.github/workflows/catalog-sync.yml'
   schedule:
     - cron: "20 3 * * *"
   workflow_dispatch:
