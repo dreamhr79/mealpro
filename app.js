@@ -106,6 +106,31 @@ function favoriteOfferSnapshot(rows) {
   return sortOffersByPrice(rows).map(offerFromCatalogRow);
 }
 
+function applyCatalogStateToFavorite(favorite, product, offers) {
+  const sorted = sortOffersByPrice(offers || []);
+  const best = sorted[0];
+  if (!best) return { ...favorite, catalogAvailable: false, offers: [], onSale: false };
+
+  // Catalog owns commercial metadata; the user owns macros/category and other
+  // personal enrichment already stored on the favorite.
+  return {
+    ...favorite,
+    catalogId: best.id,
+    barcode: product?.barcode || favorite.barcode || '',
+    name: product?.name || favorite.name,
+    brand: product?.brand || favorite.brand || '',
+    price: best.price,
+    store: best.store,
+    pack: product?.pack || best.pack || favorite.pack,
+    unit: product?.unit || best.unit || favorite.unit,
+    pricePer100: best.pricePer100,
+    onSale: best.onSale,
+    offers: favoriteOfferSnapshot(sorted),
+    catalogAvailable: true,
+    catalogUpdatedAt: new Date().toISOString()
+  };
+}
+
 function canonicalProductFromCatalogRow(row) {
   const productKey = canonicalProductKey(row);
   return {
@@ -239,11 +264,14 @@ function resolveMealItemProduct(it) {
   const snapshot = it.product && typeof it.product === 'object' ? it.product : null;
   const productId = it.productId != null ? String(it.productId) : '';
   const barcode = normalizeBarcode(snapshot?.barcode || it.barcode);
+  const snapshotOfferIds = new Set(Array.isArray(snapshot?.offers) ? snapshot.offers.map(o => String(o.id)) : []);
 
   // Always prefer the current persisted product over the recipe/day-plan snapshot.
   // This keeps prices and macros live after a favorite is refreshed by catalog sync.
   let p = favorites.find(f =>
     (productId && (String(f.id) === productId || String(f.catalogId) === productId)) ||
+    (productId && Array.isArray(f.offers) && f.offers.some(o => String(o.id) === productId)) ||
+    (f.catalogId && snapshotOfferIds.has(String(f.catalogId))) ||
     (barcode && normalizeBarcode(f.barcode) === barcode)
   ) || custom.find(c =>
     (productId && String(c.id) === productId) ||
@@ -911,6 +939,17 @@ $('#catalogSearch').onkeydown = e => { if (e.key === 'Enter') searchCatalog(e.ta
 $('#creatorCatalogBtn').onclick = () => searchCatalog($('#creatorCatalogSearch'), $('#creatorCatalogResults'));
 $('#creatorCatalogSearch').onkeydown = e => { if (e.key === 'Enter') searchCatalog(e.target, $('#creatorCatalogResults')); };
 
+function findFavoriteForCatalog(product, offers = [], productKey = '') {
+  const code = normalizeBarcode(product?.barcode);
+  const offerIds = new Set((offers || []).map(o => o.id));
+  return favorites.find(f => {
+    if (productKey && f.id === productKey) return true;
+    if (code && normalizeBarcode(f.barcode) === code) return true;
+    if (f.catalogId && offerIds.has(f.catalogId)) return true;
+    return Array.isArray(f.offers) && f.offers.some(o => offerIds.has(o.id));
+  });
+}
+
 async function favoriteFromCatalog(productKey) {
   const normalized = await CatalogRepository.getProduct(productKey);
   if (!normalized?.product || !normalized.offers?.length) return;
@@ -919,24 +958,10 @@ async function favoriteFromCatalog(productKey) {
   const allOffers = sortOffersByPrice(normalized.offers);
   const bestOffer = allOffers[0];
 
-  const existingFav = favorites.find(f =>
-    f.id === productKey ||
-    (normalizeBarcode(p.barcode) && normalizeBarcode(f.barcode) === normalizeBarcode(p.barcode)) ||
-    f.catalogId === bestOffer.id
-  );
+  const existingFav = findFavoriteForCatalog(p, allOffers, productKey);
 
   if (existingFav) {
-    existingFav.catalogId = bestOffer.id;
-    existingFav.name = p.name || existingFav.name;
-    existingFav.brand = p.brand || existingFav.brand || '';
-    existingFav.barcode = p.barcode || existingFav.barcode || '';
-    existingFav.price = bestOffer.price;
-    existingFav.store = bestOffer.store;
-    existingFav.pack = p.pack || bestOffer.pack;
-    existingFav.unit = p.unit || bestOffer.unit;
-    existingFav.pricePer100 = bestOffer.pricePer100;
-    existingFav.onSale = bestOffer.onSale;
-    existingFav.offers = favoriteOfferSnapshot(allOffers);
+    Object.assign(existingFav, applyCatalogStateToFavorite(existingFav, p, allOffers));
     await dbPut('favorites', existingFav);
     await propagateProductUpdate(existingFav);
     await loadAll();
@@ -978,6 +1003,41 @@ async function favoriteFromCatalog(productKey) {
   showToast(`${newFav.name} je dodan u Favorite (najniža cijena: ${eur(newFav.price)} u ${newFav.store}).`);
   return newFav;
 }
+async function refreshFavoritesFromCatalog({ silent = true } = {}) {
+  if (!favorites.length || !CatalogRepository.isOnline()) return { refreshed: 0, unavailable: 0 };
+  let refreshed = 0, unavailable = 0;
+
+  for (const favorite of [...favorites]) {
+    const key = favorite.id?.startsWith('ean:') || favorite.id?.startsWith('source:')
+      ? favorite.id
+      : (normalizeBarcode(favorite.barcode) ? `ean:${normalizeBarcode(favorite.barcode)}` : '');
+    if (!key) continue;
+
+    try {
+      const current = await CatalogRepository.getProduct(key);
+      if (!current?.product || !current.offers?.length) {
+        const missing = { ...favorite, catalogAvailable: false, offers: [], onSale: false };
+        await dbPut('favorites', missing);
+        await propagateProductUpdate(missing);
+        unavailable++;
+        continue;
+      }
+      const updated = applyCatalogStateToFavorite(favorite, current.product, current.offers);
+      await dbPut('favorites', updated);
+      await propagateProductUpdate(updated);
+      refreshed++;
+    } catch (err) {
+      console.warn('Favorite refresh skipped:', favorite.id, err);
+    }
+  }
+
+  if (refreshed || unavailable) {
+    await loadAll();
+    if (!silent) showToast(`Favoriti osvježeni: ${refreshed}, nedostupni: ${unavailable}.`);
+  }
+  return { refreshed, unavailable };
+}
+
 async function addCatalogToMeal(cid) {
   const f = await favoriteFromCatalog(cid);
   if (!f) return;
@@ -1012,6 +1072,8 @@ function formatUnitValue(p) {
 function productCard(p, type) {
   const unitBadge = formatUnitValue(p);
   const saleBadge = p.onSale ? '<span class="saleBadgeMini">🔥 AKCIJA</span>' : '';
+  const unavailableBadge = type === 'favorites' && p.catalogAvailable === false
+    ? '<span class="saleBadgeMini">NEMA U AKTUALNOM KATALOGU</span>' : '';
   const offers = (Array.isArray(p.offers) && p.offers.length > 1) ? p.offers : null;
 
   let offersHtml = '';
@@ -1033,7 +1095,7 @@ function productCard(p, type) {
   return `
   <div class="item favCard">
     <div>
-      <div class="name" style="font-size:15px">${esc(p.name)} ${saleBadge}</div>
+      <div class="name" style="font-size:15px">${esc(p.name)} ${saleBadge} ${unavailableBadge}</div>
       <div class="meta" style="font-size:13px">
         ${esc(p.brand || '')} · <b>${num(p.pack, 0)} ${esc(p.unit)}</b> · 
         Najniža cijena: <b style="color:var(--accent);font-size:15px">${eur(p.price)}</b> (${esc(p.store || '')})
@@ -1873,7 +1935,9 @@ $('#syncStart').onclick = async () => {
     }
 
     if (!all.length) throw Error('U odabranim lancima nisu pronađeni valjani artikli. Postojeća baza nije promijenjena.');
-    if (missingChains.length) log(`Upozorenje: ZIP nema potpune CSV podatke za: ${missingChains.join(', ')}. Ti lanci nisu ažurirani.`);
+    if (missingChains.length) {
+      throw Error(`Sinkronizacija je prekinuta jer ZIP nema potpune CSV podatke za: ${missingChains.join(', ')}. Postojeća baza nije promijenjena.`);
+    }
     // Build the normalized model directly. We no longer persist the raw
     // per-store catalog, avoiding a duplicate copy of the same cijene.dev data.
     const normalized = buildNormalizedCatalogModel(all);
@@ -1899,29 +1963,25 @@ $('#syncStart').onclick = async () => {
       if (!offersByKey.has(offer.productKey)) offersByKey.set(offer.productKey, []);
       offersByKey.get(offer.productKey).push(offer);
     }
+    const offerById = new Map(normalized.offers.map(o => [o.id, o]));
     for (const f of favorites) {
-      const productKey = f.id?.startsWith('ean:') || f.id?.startsWith('source:')
-        ? f.id
-        : (normalizeBarcode(f.barcode) ? `ean:${normalizeBarcode(f.barcode)}` : '');
+      const directKey = f.id?.startsWith('ean:') || f.id?.startsWith('source:') ? f.id : '';
+      const barcodeKey = normalizeBarcode(f.barcode) ? `ean:${normalizeBarcode(f.barcode)}` : '';
+      const legacyOfferKey = f.catalogId ? offerById.get(f.catalogId)?.productKey || '' : '';
+      const productKey = directKey || barcodeKey || legacyOfferKey;
       if (!productKey) continue;
       const product = productByKey.get(productKey);
       let offers = offersByKey.get(productKey) || [];
-      if (!product || !offers.length) continue;
-      offers = sortOffersByPrice(offers);
-      const best = offers[0];
-      Object.assign(f, {
-        catalogId: best.id,
-        barcode: product.barcode || f.barcode || '',
-        name: product.name || f.name,
-        brand: product.brand || f.brand || '',
-        price: best.price,
-        store: best.store,
-        pack: product.pack || best.pack,
-        unit: product.unit || best.unit,
-        pricePer100: best.pricePer100,
-        onSale: best.onSale,
-        offers: favoriteOfferSnapshot(offers)
-      });
+      if (!product || !offers.length) {
+        if (f.catalogId || directKey || barcodeKey) {
+          const unavailable = { ...f, catalogAvailable: false, offers: [], onSale: false };
+          await dbPut('favorites', unavailable);
+          await propagateProductUpdate(unavailable);
+        }
+        continue;
+      }
+      const refreshed = applyCatalogStateToFavorite(f, product, offers);
+      Object.assign(f, refreshed);
       await dbPut('favorites', f);
       await propagateProductUpdate(f);
     }
@@ -1935,7 +1995,7 @@ $('#syncStart').onclick = async () => {
       if (manualInput) manualInput.value = '';
       log('Ručni ZIP je potrošen i uklonjen iz memorije.');
     }
-    showToast(missingChains.length ? 'Baza je ažurirana, ali dio odabranih lanaca nije bio dostupan u ZIP-u.' : 'Baza cijena je uspješno ažurirana!');
+    showToast('Baza cijena je uspješno ažurirana!');
     setTimeout(() => $('#syncDialog').close(), 1200);
   } catch (err) {
     console.error(err);
@@ -2462,7 +2522,11 @@ $('#backupFileInput').onchange = async e => {
 };
 
 // Initial Start
-loadAll().catch(e => {
+loadAll().then(() => {
+  // Keep persisted favorites useful offline, then opportunistically refresh
+  // their commercial data when the central catalog is configured/reachable.
+  setTimeout(() => refreshFavoritesFromCatalog({ silent: true }), 250);
+}).catch(e => {
   console.error('Start error:', e);
   const syncState = $('#syncState');
   if (syncState) syncState.textContent = 'Greška pri učitavanju lokalnih podataka. Osvježi aplikaciju i pokušaj ponovno.';
