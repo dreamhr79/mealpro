@@ -793,7 +793,7 @@ async function favoriteFromCatalog(cid) {
     existingFav.pricePer100 = bestOffer.pricePer100;
     existingFav.onSale = bestOffer.onSale;
     existingFav.offers = allOffers.map(o => ({
-      store: o.store, price: o.price, pack: o.pack, unit: o.unit,
+      id: o.id, store: o.store, price: o.price, pack: o.pack, unit: o.unit,
       pricePer100: o.pricePer100, onSale: o.onSale
     }));
     await dbPut('favorites', existingFav);
@@ -816,7 +816,7 @@ async function favoriteFromCatalog(cid) {
     pricePer100: bestOffer.pricePer100,
     onSale: bestOffer.onSale,
     offers: allOffers.map(o => ({
-      store: o.store, price: o.price, pack: o.pack, unit: o.unit,
+      id: o.id, store: o.store, price: o.price, pack: o.pack, unit: o.unit,
       pricePer100: o.pricePer100, onSale: o.onSale
     })),
     kcal: 0, protein: 0, carbs: 0, fat: 0,
