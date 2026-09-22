@@ -688,6 +688,12 @@ async function searchCatalog(inp, out) {
   const groupedProducts = [];
   for (const [key, items] of groupMap.entries()) {
     items.sort((a, b) => {
+      // Inside one EAN group every row is the same physical product, so the
+      // cheapest store price is the offer we should present as the default.
+      if (key.startsWith('ean:')) {
+        const ap = Number(a.price) || Infinity, bp = Number(b.price) || Infinity;
+        if (ap !== bp) return ap - bp;
+      }
       const va = getUnitValuePer100(a), vb = getUnitValuePer100(b);
       if (Number.isFinite(va) && Number.isFinite(vb) && va !== vb) return va - vb;
       return (Number(a.price) || 0) - (Number(b.price) || 0);
