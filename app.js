@@ -2215,12 +2215,17 @@ $('#igSaveBtn').onclick = async () => {
     savedAt: new Date().toISOString()
   };
 
-  await dbPut('recipes', r);
-  recipes = await dbAll('recipes');
-  renderRecipes();
-  $('#recipeCount').textContent = `(${recipes.length})`;
-  showToast(`Recept "${title}" je uspješno spremljen s uputama i makrosima!`);
-  $('#tabs button[data-tab="recipes"]').click();
+  try {
+    await dbPut('recipes', r);
+    recipes = await dbAll('recipes');
+    renderRecipes();
+    $('#recipeCount').textContent = `(${recipes.length})`;
+    showToast(`Recept "${title}" je uspješno spremljen s uputama i makrosima!`);
+    $('#tabs button[data-tab="recipes"]').click();
+  } catch (err) {
+    console.error('Instagram recipe save error:', err);
+    showToast('Spremanje uvezenog recepta nije uspjelo.');
+  }
 };
 
 $('#igOpenInCreatorBtn').onclick = async () => {
@@ -2241,22 +2246,28 @@ $('#igOpenInCreatorBtn').onclick = async () => {
 
 // === BACKUP (IMPORT / EXPORT JSON) ===
 $('#exportBackupBtn').onclick = async () => {
-  const payload = {
-    format: 'CijeneMealProBackupV2',
-    exportedAt: new Date().toISOString(),
-    favorites: await dbAll('favorites'),
-    custom: await dbAll('custom'),
-    recipes: await dbAll('recipes'),
-    dayPlan
-  };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `cijenemeal-pro-backup-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  $('#backupStatus').textContent = '✓ Backup datoteka je uspješno preuzeta.';
+  try {
+    const payload = {
+      format: 'CijeneMealProBackupV2',
+      exportedAt: new Date().toISOString(),
+      favorites: await dbAll('favorites'),
+      custom: await dbAll('custom'),
+      recipes: await dbAll('recipes'),
+      dayPlan
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cijenemeal-pro-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    $('#backupStatus').textContent = '✓ Backup datoteka je uspješno preuzeta.';
+  } catch (err) {
+    console.error('Backup export error:', err);
+    $('#backupStatus').textContent = 'Greška pri izradi backupa.';
+    showToast('Izrada backup datoteke nije uspjela.');
+  }
 };
 
 $('#importBackupBtn').onclick = () => $('#backupFileInput').click();
