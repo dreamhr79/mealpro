@@ -804,8 +804,29 @@ document.addEventListener('click', async e => {
   if (b.classList.contains('loadRecipe')) loadRecipe(b.dataset.id);
   if (b.classList.contains('recipeUseAlternative')) {
     const recipe = recipes.find(x => x.id === b.dataset.recipeId);
-    const source = b.dataset.altSource === 'Favorit' ? favorites : custom;
-    const replacement = source.find(x => String(x.id) === String(b.dataset.altId));
+    let source = b.dataset.altSource === 'Favorit' ? favorites : custom;
+    let replacement = source.find(x => String(x.id) === String(b.dataset.altId));
+    if (!replacement && b.dataset.altSource === 'Baza') {
+      const cached = [...recipeCatalogAlternatives.values()].find(x => String(x.product.id) === String(b.dataset.altId));
+      if (cached?.product) {
+        const catalogProduct = cached.product;
+        const productKey = canonicalProductKey(catalogProduct);
+        const existing = favorites.find(f => String(f.id) === productKey || (normalizeBarcode(f.barcode) && normalizeBarcode(f.barcode) === normalizeBarcode(catalogProduct.barcode)));
+        replacement = existing || {
+          ...catalogProduct,
+          id: productKey || catalogProduct.id,
+          catalogId: catalogProduct.catalogId || catalogProduct.id,
+          addedAt: new Date().toISOString()
+        };
+        if (!existing) {
+          await dbPut('favorites', replacement);
+          favorites.push(replacement);
+          renderFavorites();
+          renderPicker();
+          $('#favCount').textContent = `(${favorites.length})`;
+        }
+      }
+    }
     const item = recipe?.items?.find(it => {
       const p = resolveMealItemProduct(it);
       return String(p.id) === String(b.dataset.productId) || String(it.productId) === String(b.dataset.productId);
