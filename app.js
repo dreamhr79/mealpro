@@ -1397,7 +1397,12 @@ function cheaperRecipeAlternative(product) {
   const currentValue = getUnitValuePer100(product);
   if (!(Number.isFinite(currentValue) && currentValue > 0)) return null;
   const candidates = [...favorites.map(p => ({ product: p, source: 'Favorit' })), ...custom.map(p => ({ product: p, source: 'Moj proizvod' }))]
-    .filter(x => String(x.product.id) !== String(product.id) && x.product.catalogAvailable !== false && comparableRecipeProduct(product, x.product))
+    .filter(x => {
+      const sameId = String(x.product.id) === String(product.id);
+      const aCode = normalizeBarcode(product.barcode), bCode = normalizeBarcode(x.product.barcode);
+      const sameEan = aCode && bCode && aCode === bCode;
+      return !sameId && !sameEan && x.product.catalogAvailable !== false && comparableRecipeProduct(product, x.product);
+    })
     .map(x => ({ ...x, value: getUnitValuePer100(x.product) }))
     .filter(x => Number.isFinite(x.value) && x.value > 0 && x.value < currentValue * 0.995)
     .sort((a,b) => a.value - b.value);
