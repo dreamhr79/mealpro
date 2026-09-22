@@ -171,10 +171,12 @@ async function dbSyncCatalogModel(products,offers,syncedAt){
  const changed=[];
  for(const o of offers||[]){
   const prev=oldById.get(o.id);
-  if(!prev || Number(prev.price)!==Number(o.price) || !!prev.onSale!==!!o.onSale){
+  // The first normalized sync establishes the baseline. History records actual
+  // subsequent price/sale changes only, avoiding one history row per catalog item.
+  if(prev && (Number(prev.price)!==Number(o.price) || !!prev.onSale!==!!o.onSale)){
    changed.push({
     productKey:o.productKey,offerId:o.id,store:o.store,price:o.price,
-    onSale:!!o.onSale,recordedAt:syncedAt
+    previousPrice:Number(prev.price)||0,onSale:!!o.onSale,recordedAt:syncedAt
    });
   }
  }
