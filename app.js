@@ -1745,10 +1745,15 @@ $('#syncStart').onclick = async () => {
       log(`Obrađujem ${CHAINS[chain]}…`);
       const prices = parseCsv(pr), best = new Map();
       for (let i = 1; i < prices.length; i++) {
-        const c = prices[i], pid = (c[1] || '').trim(), special = nval(c[6]), price = special ?? nval(c[2]);
-        if (!pid || !price) continue;
+        const c = prices[i], pid = (c[1] || '').trim();
+        const regular = nval(c[2]), special = nval(c[6]);
+        // A sale price is valid only when it is a positive amount. Zero/blank
+        // must not replace the regular price or mark an item as discounted.
+        const hasSpecial = Number.isFinite(special) && special > 0;
+        const price = hasSpecial ? special : regular;
+        if (!pid || !(price > 0)) continue;
         const prev = best.get(pid);
-        if (!prev || price < prev.price) best.set(pid, { price, ppu: nval(c[3]), sale: !!special });
+        if (!prev || price < prev.price) best.set(pid, { price, ppu: nval(c[3]), sale: hasSpecial });
       }
       const products = parseCsv(pt);
       for (let i = 1; i < products.length; i++) {
