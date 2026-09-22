@@ -1174,7 +1174,9 @@ function calculateDayTotals() {
   let t = { kcal: 0, protein: 0, carbs: 0, fat: 0, price: 0 };
   for (const block of dayPlan.blocks || []) {
     for (const it of block.items || []) {
-      const p = it.product, q = Number(it.qty) || 0, f = (p.unit === 'kom' ? q : q / 100);
+      const p = resolveMealItemProduct(it);
+      it.product = p;
+      const q = Number(it.qty) || 0, f = (p.unit === 'kom' ? q : q / 100);
       t.kcal += Number(p.kcal || 0) * f;
       t.protein += Number(p.protein || 0) * f;
       t.carbs += Number(p.carbs || 0) * f;
@@ -1204,7 +1206,9 @@ function renderDayPlan() {
   $('#dayBlocks').innerHTML = (dayPlan.blocks || []).map((b, bi) => {
     let bt = { kcal: 0, protein: 0, carbs: 0, fat: 0, price: 0 };
     for (const it of b.items || []) {
-      const p = it.product, q = Number(it.qty) || 0, f = (p.unit === 'kom' ? q : q / 100);
+      const p = resolveMealItemProduct(it);
+      it.product = p;
+      const q = Number(it.qty) || 0, f = (p.unit === 'kom' ? q : q / 100);
       bt.kcal += Number(p.kcal || 0) * f;
       bt.protein += Number(p.protein || 0) * f;
       bt.carbs += Number(p.carbs || 0) * f;
@@ -1395,8 +1399,10 @@ function generateShoppingList() {
 
   for (const b of dayPlan.blocks) {
     for (const it of b.items || []) {
-      const pid = it.product.id;
-      const cur = itemMap.get(pid) || { product: it.product, qty: 0 };
+      const p = resolveMealItemProduct(it);
+      it.product = p;
+      const pid = p.id || it.productId || `unlinked:${norm(p.name || 'item')}`;
+      const cur = itemMap.get(pid) || { product: p, qty: 0 };
       cur.qty += (Number(it.qty) || 0);
       itemMap.set(pid, cur);
     }
