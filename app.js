@@ -88,17 +88,20 @@ function packFromName(name) {
   return null;
 }
 
-function packFromUnitPrice(price, ppu) {
-  const p = Number(price) || 0, u = Number(ppu) || 0;
-  if (p > 0 && u > 0) {
-    const ratio = p / u; // e.g. 0.75 / 1.50 = 0.5 kg or 0.5 L
-    if (ratio > 0.005 && ratio < 50) {
-      const gramsOrMl = Math.round(ratio * 1000);
-      if (gramsOrMl >= 10) {
-        return { pack: gramsOrMl, unit: 'g', source: 'unit-price' };
-      }
-    }
-  }
+function packFromUnitPrice(price, ppu, rawUnit = '') {
+  const p = Number(price) || 0, unitPrice = Number(ppu) || 0;
+  if (!(p > 0) || !(unitPrice > 0)) return null;
+
+  const ratio = p / unitPrice; // package share of 1 kg / 1 L
+  if (!(ratio > 0.005 && ratio < 50)) return null;
+  const pack = Math.round(ratio * 1000);
+  if (pack < 10) return null;
+
+  const u = norm(rawUnit);
+  // Unit-price math alone cannot distinguish kg from L. Preserve the source
+  // unit when it tells us; otherwise do not invent grams for an unknown "kom".
+  if (u === 'l' || u === 'ml') return { pack, unit: 'ml', source: 'unit-price' };
+  if (u === 'kg' || u === 'g') return { pack, unit: 'g', source: 'unit-price' };
   return null;
 }
 
@@ -108,7 +111,7 @@ function calcSmartPack(rawQty, rawUnit, name, price = 0, ppu = 0) {
   if (fromName) return fromName;
 
   // Signal 2: Izračun iz jedinične cijene u trgovini (cijena po kg / L)
-  const fromPpu = packFromUnitPrice(price, ppu);
+  const fromPpu = packFromUnitPrice(price, ppu, rawUnit);
 
   let q = nval(rawQty), u = norm(rawUnit);
   let parsedUnit = (u === 'kg' || u === 'g') ? 'g' : (u === 'l' || u === 'ml') ? 'ml' : 'kom';
