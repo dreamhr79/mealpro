@@ -28,6 +28,12 @@ jobs:
           for f in app.html app.js db.js zip.js cache-reset.js styles.css catalog-repository.js supabase-catalog-adapter.js config.js; do test -s "$f"; done
           ! grep -R -n -E '<<<<<<<|=======|>>>>>>>' app.html app.js db.js styles.css
           ! grep -n 'async async' app.js
+          ! grep -n '\$\$\$(' app.js
+          ! grep -n -E 'corsproxy\.io|allorigins\.win|fetchWithCorsFallback' app.js
+          node --check app.js
+          node --check db.js
+          node --check catalog-repository.js
+          node --check supabase-catalog-adapter.js
       - uses: actions/configure-pages@v5
       - name: Prepare static site
         run: |
