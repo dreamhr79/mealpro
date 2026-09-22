@@ -378,3 +378,8 @@ main {
 @media(max-width:760px){.recipeServingCustom{width:100%}.recipeServingInput{flex:0 0 64px}.recipeServingCustom button{flex:1}}
 
 .recipeSource{display:inline-block;margin-left:5px;padding:1px 5px;border-radius:999px;background:#eef2f6;color:var(--muted);font-size:10px;font-weight:700}
+
+.recipeIngredientWrap{border-bottom:1px solid #edf1f5}
+.recipeIngredientWrap .recipeIngredient{border-bottom:0}
+.recipeAlternative{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 0 7px;font-size:11px;color:#087a55}
+.recipeAlternative button{padding:4px 8px;font-size:11px}
