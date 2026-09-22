@@ -119,10 +119,9 @@ Deno.serve(async (req) => {
       const priceEntry = archiveIndex.entries.get(`${chain}/prices.csv`);
       if (!productEntry || !priceEntry) { missingChains.push(chain); continue; }
 
-      let productsText = await readRemoteZipText(archive.url, productEntry);
-      let pricesText = await readRemoteZipText(archive.url, priceEntry);
+      const pricesText = await readRemoteZipText(archive.url, priceEntry);
+      const productsText = await readRemoteZipText(archive.url, productEntry);
       const rows = parseChain(chain, productsText, pricesText);
-      productsText = ""; pricesText = "";
       const model = normalizeRows(rows);
       rows.length = 0;
 
