@@ -366,7 +366,7 @@ async function loadAll() {
   }
   
   const mSync = await dbGet('meta', 'sync');
-  if (mSync) $('#syncState').textContent = `Baza: ${mSync.date} · ${mSync.count.toLocaleString('hr-HR')} artikala`;
+  if (mSync) $('#syncState').textContent = `Lokalni cache: ${mSync.date || 'spremljen'}`;
   
   const mDay = await dbGet('meta', 'dayPlan');
   if (mDay && mDay.val) {
@@ -2229,174 +2229,47 @@ $('#copyShopList').onclick = () => {
   });
 };
 
-// === SINKRONIZACIJA CIJENE.DEV ===
-$('#syncBtn').onclick = () => $('#syncDialog').showModal();
-$('#quickSyncBtn').onclick = () => $('#syncDialog').showModal();
-$('#syncCancel').onclick = () => $('#syncDialog').close();
-
-$('#chainChecks').innerHTML = Object.entries(CHAINS).map(([k, v]) => `
-  <label><input type="checkbox" value="${k}" ${['konzum', 'lidl', 'spar', 'plodine', 'tommy', 'eurospin', 'kaufland'].includes(k) ? 'checked' : ''}>${v}</label>
-`).join('');
-
-async function fetchWithCorsFallback(url, options = {}) {
-  // 1. Probaj direktno (za Chrome ekstenziju ili ako server dopusti CORS)
+// === CENTRALNI KATALOG (SUPABASE) ===
+async function refreshCentralCatalogStatus({ toast = false } = {}) {
+  const state = $('#syncState');
+  const progress = $('#syncProgress');
   try {
-    const r = await fetch(url, options);
-    if (r.ok) return r;
-  } catch (e) {
-    console.warn('Direktni fetch nije uspio, isprobavam proxy 1...', e);
+    if (progress) progress.textContent = 'Provjeravam centralnu bazu…';
+    const status = await CatalogRepository.status();
+    if (!status) {
+      if (state) state.textContent = 'Centralna baza: nema uspješne sinkronizacije';
+      if (progress) progress.textContent = 'Nema evidentirane uspješne sinkronizacije. Server mora pokrenuti catalog-sync.';
+      if (toast) showToast('Centralna baza još nema uspješnu sinkronizaciju.');
+      return null;
+    }
+    const date = status.archive_date || (status.finished_at ? String(status.finished_at).slice(0, 10) : '');
+    const products = Number(status.products_count) || 0;
+    const offers = Number(status.offers_count) || 0;
+    if (state) state.textContent = `Baza: ${date || 'ažurirana'} · ${products.toLocaleString('hr-HR')} proizvoda`;
+    if (progress) progress.textContent = `Supabase katalog: ${products.toLocaleString('hr-HR')} proizvoda · ${offers.toLocaleString('hr-HR')} ponuda · zadnje ažuriranje ${date || 'nepoznato'}.`;
+    if (toast) showToast('Stanje centralne baze je osvježeno.');
+    return status;
+  } catch (err) {
+    console.error('Central catalog status error:', err);
+    if (state) state.textContent = 'Centralna baza nije dostupna';
+    if (progress) progress.textContent = 'Ne mogu dohvatiti stanje Supabase kataloga: ' + err.message;
+    if (toast) showToast('Provjera centralne baze nije uspjela.');
+    return null;
   }
-
-  // 2. Proxy 1: corsproxy.io
-  try {
-    const p1 = 'https://corsproxy.io/?' + encodeURIComponent(url);
-    const r1 = await fetch(p1, options);
-    if (r1.ok) return r1;
-  } catch (e) {
-    console.warn('Proxy 1 nije uspio, isprobavam proxy 2...', e);
-  }
-
-  // 3. Proxy 2: allorigins.win
-  try {
-    const p2 = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
-    const r2 = await fetch(p2, options);
-    if (r2.ok) return r2;
-  } catch (e) {
-    console.warn('Proxy 2 nije uspio...', e);
-  }
-
-  throw Error('Neuspješno dohvaćanje podataka (CORS blokada ili prekid veze).');
 }
 
+$('#syncBtn').onclick = () => {
+  $('#syncDialog').showModal();
+  refreshCentralCatalogStatus();
+};
+$('#quickSyncBtn').onclick = () => {
+  $('#syncDialog').showModal();
+  refreshCentralCatalogStatus();
+};
+$('#syncCancel').onclick = () => $('#syncDialog').close();
 $('#syncStart').onclick = async () => {
-  const chains = $$('#chainChecks input:checked').map(x => x.value);
-  if (!chains.length) return alert('Odaberi barem jedan lanac.');
-  const log = m => { $('#syncProgress').textContent = m; };
-
-  try {
-    log('Dohvaćam popis arhiva s api.cijene.dev…');
-    const lr = await fetchWithCorsFallback('https://api.cijene.dev/v0/list');
-    if (!lr.ok) throw Error('HTTP ' + lr.status);
-    const list = await lr.json(), latest = newestArchive(list.archives);
-    if (!latest?.url) throw Error('Nema dostupnih arhiva.');
-
-    const usingManualZip = !!manualZipBuffer;
-    let buf = manualZipBuffer;
-    if (!buf) {
-      log(`Preuzimam arhivu ${latest.date}…`);
-      const zr = await fetchWithCorsFallback(latest.url);
-      if (!zr.ok) throw Error('Greška pri preuzimanju arhive: HTTP ' + zr.status);
-      buf = await zr.arrayBuffer();
-    } else {
-      log('Koristim ručno učitani ZIP...');
-    }
-
-    log(`ZIP ${(buf.byteLength / 1024 / 1024).toFixed(1)} MB. Otvaram odabrane lance…`);
-    const wanted = n => chains.some(c => n === `${c}/products.csv` || n === `${c}/prices.csv`);
-    const files = await readZipFiles(buf, wanted);
-
-    const all = [];
-    const missingChains = [];
-    for (const chain of chains) {
-      const pt = files[`${chain}/products.csv`], pr = files[`${chain}/prices.csv`];
-      if (!pt || !pr) {
-        missingChains.push(CHAINS[chain] || chain);
-        continue;
-      }
-      log(`Obrađujem ${CHAINS[chain]}…`);
-      const prices = parseCsv(pr), best = new Map();
-      for (let i = 1; i < prices.length; i++) {
-        const c = prices[i], pid = (c[1] || '').trim();
-        const regular = nval(c[2]), special = nval(c[6]);
-        // A sale price is valid only when it is a positive amount. Zero/blank
-        // must not replace the regular price or mark an item as discounted.
-        const hasSpecial = Number.isFinite(special) && special > 0;
-        const price = hasSpecial ? special : regular;
-        if (!pid || !(price > 0)) continue;
-        const prev = best.get(pid);
-        if (!prev || price < prev.price) best.set(pid, { price, ppu: nval(c[3]), sale: hasSpecial });
-      }
-      const products = parseCsv(pt);
-      for (let i = 1; i < products.length; i++) {
-        const c = products[i], pid = (c[0] || '').trim(), name = (c[2] || '').trim(), bp = best.get(pid);
-        if (!pid || !name || !bp) continue;
-        const pu = calcSmartPack(c[6], c[5], name, bp.price, bp.ppu), barcode = normalizeBarcode(c[1]), search = norm(`${name} ${c[3] || ''} ${barcode}`);
-        all.push({
-          id: `${chain}:${pid}`, externalId: pid, barcode, name,
-          brand: (c[3] || '').trim(), pack: pu.pack, unit: pu.unit, price: bp.price,
-          pricePer100: (pu.unit === 'g' || pu.unit === 'ml') ? (bp.price / pu.pack * 100) : null,
-          onSale: bp.sale, store: CHAINS[chain], search, tokens: tokens(search)
-        });
-      }
-    }
-
-    if (!all.length) throw Error('U odabranim lancima nisu pronađeni valjani artikli. Postojeća baza nije promijenjena.');
-    if (missingChains.length) {
-      throw Error(`Sinkronizacija je prekinuta jer ZIP nema potpune CSV podatke za: ${missingChains.join(', ')}. Postojeća baza nije promijenjena.`);
-    }
-    // Build the normalized model directly. We no longer persist the raw
-    // per-store catalog, avoiding a duplicate copy of the same cijene.dev data.
-    const normalized = buildNormalizedCatalogModel(all);
-    if (!normalized.products.length || !normalized.offers.length) {
-      throw Error('Normalizacija nije proizvela valjane proizvode i ponude. Postojeća baza nije promijenjena.');
-    }
-    const invalidOffers = normalized.offers.filter(o => !o.productKey || !(Number(o.price) > 0));
-    if (invalidOffers.length) {
-      throw Error(`Normalizacija je pronašla ${invalidOffers.length} nevaljanih ponuda. Postojeća baza nije promijenjena.`);
-    }
-    log(`Spremam ${normalized.products.length.toLocaleString('hr-HR')} proizvoda i ${normalized.offers.length.toLocaleString('hr-HR')} aktualnih ponuda…`);
-    const syncStamp = new Date().toISOString();
-    const modelStats = await dbSyncCatalogModel(normalized.products, normalized.offers, syncStamp);
-    const prunedHistory = await dbPrunePriceHistory(30);
-    log(`Model: ${modelStats.products.toLocaleString('hr-HR')} proizvoda · ${modelStats.offers.toLocaleString('hr-HR')} aktualnih ponuda · ${modelStats.priceChanges.toLocaleString('hr-HR')} promjena cijene · ${modelStats.removedOffers.toLocaleString('hr-HR')} nestalih ponuda`);
-    if (prunedHistory) log(`Povijest cijena: uklonjeno ${prunedHistory.toLocaleString('hr-HR')} zastarjelih zapisa (zadržano najviše 30 promjena po ponudi).`);
-
-    // Refresh favorites from the normalized in-memory model without rebuilding
-    // a second raw catalog copy.
-    const productByKey = new Map(normalized.products.map(p => [p.id, p]));
-    const offersByKey = new Map();
-    for (const offer of normalized.offers) {
-      if (!offersByKey.has(offer.productKey)) offersByKey.set(offer.productKey, []);
-      offersByKey.get(offer.productKey).push(offer);
-    }
-    const offerById = new Map(normalized.offers.map(o => [o.id, o]));
-    for (const f of favorites) {
-      const directKey = f.id?.startsWith('ean:') || f.id?.startsWith('source:') ? f.id : '';
-      const barcodeKey = normalizeBarcode(f.barcode) ? `ean:${normalizeBarcode(f.barcode)}` : '';
-      const legacyOfferKey = f.catalogId ? offerById.get(f.catalogId)?.productKey || '' : '';
-      const productKey = directKey || barcodeKey || legacyOfferKey;
-      if (!productKey) continue;
-      const product = productByKey.get(productKey);
-      let offers = offersByKey.get(productKey) || [];
-      if (!product || !offers.length) {
-        if (f.catalogId || directKey || barcodeKey) {
-          const unavailable = { ...f, catalogAvailable: false, offers: [], onSale: false };
-          await dbPut('favorites', unavailable);
-          await propagateProductUpdate(unavailable);
-        }
-        continue;
-      }
-      const refreshed = applyCatalogStateToFavorite(f, product, offers);
-      Object.assign(f, refreshed);
-      await dbPut('favorites', f);
-      await propagateProductUpdate(f);
-    }
-
-    await dbPut('meta', { key: 'sync', date: latest.date || null, archiveUrl: latest.url || null, count: all.length, products: modelStats.products, offers: modelStats.offers, priceChanges: modelStats.priceChanges, removedOffers: modelStats.removedOffers, missingChains, source: usingManualZip ? 'manual-zip' : 'cijene.dev', schemaVersion: 2, syncedAt: syncStamp });
-    await loadAll();
-    log(`Gotovo! Baza sadrži ${all.length.toLocaleString('hr-HR')} ažuriranih artikala.`);
-    if (usingManualZip) {
-      manualZipBuffer = null;
-      const manualInput = $('#manualZip');
-      if (manualInput) manualInput.value = '';
-      log('Ručni ZIP je potrošen i uklonjen iz memorije.');
-    }
-    showToast('Baza cijena je uspješno ažurirana!');
-    setTimeout(() => $('#syncDialog').close(), 1200);
-  } catch (err) {
-    console.error(err);
-    log('Greška: ' + err.message);
-  }
+  await refreshCentralCatalogStatus({ toast: true });
+  await refreshFavoritesFromCatalog({ silent: false });
 };
 
 // === INSTAGRAM IMPORTER ===
@@ -2921,7 +2794,10 @@ $('#backupFileInput').onchange = async e => {
 loadAll().then(() => {
   // Keep persisted favorites useful offline, then opportunistically refresh
   // their commercial data when the central catalog is configured/reachable.
-  setTimeout(() => refreshFavoritesFromCatalog({ silent: true }), 250);
+  setTimeout(async () => {
+    await refreshCentralCatalogStatus();
+    await refreshFavoritesFromCatalog({ silent: true });
+  }, 250);
 }).catch(e => {
   console.error('Start error:', e);
   const syncState = $('#syncState');
