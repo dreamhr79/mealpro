@@ -1331,12 +1331,39 @@ $('#productForm').onsubmit = async e => {
 };
 
 // === RECEPTI ===
+function favoriteCandidateForProduct(product) {
+  const barcode = normalizeBarcode(product?.barcode);
+  return favorites.find(f =>
+    (barcode && normalizeBarcode(f.barcode) === barcode) ||
+    (product?.catalogId && String(f.catalogId) === String(product.catalogId)) ||
+    (product?.id && String(f.id) === String(product.id))
+  ) || null;
+}
+
+function customCandidateForProduct(product) {
+  const barcode = normalizeBarcode(product?.barcode);
+  return custom.find(p =>
+    (barcode && normalizeBarcode(p.barcode) === barcode) ||
+    (product?.id && String(p.id) === String(product.id))
+  ) || null;
+}
+
+function preferredRecipeProduct(item) {
+  const snapshot = item?.product && typeof item.product === 'object' ? item.product : {};
+  const favorite = favoriteCandidateForProduct(snapshot);
+  if (favorite) return { product: repairProductPackage(favorite), source: 'Favorit' };
+  const own = customCandidateForProduct(snapshot);
+  if (own) return { product: repairProductPackage(own), source: 'Moj proizvod' };
+  return { product: resolveMealItemProduct(item), source: snapshot?.catalogId || snapshot?.barcode ? 'Baza' : 'Spremljeno' };
+}
+
 function recipeLiveState(recipe) {
   const items = (Array.isArray(recipe?.items) ? recipe.items : [])
     .filter(it => Number(it?.qty) > 0)
     .map(it => {
-      const product = resolveMealItemProduct(it);
-      return { ...it, productId: product.id || it.productId || null, product };
+      const preferred = preferredRecipeProduct(it);
+      const product = preferred.product;
+      return { ...it, productId: product.id || it.productId || null, product, priceSource: preferred.source };
     });
   const servings = Math.max(1, Number(recipe?.servings) || 1);
   let totals = { kcal: 0, protein: 0, carbs: 0, fat: 0, cost: 0 };
@@ -1493,7 +1520,7 @@ function renderRecipes() {
       <div class="recipeItems">
         ${items.map(x => {
           const unavailable = x.product.catalogAvailable === false ? '<span class="saleBadgeMini">nije u aktualnom katalogu</span>' : '';
-          return `<div class="recipeIngredient"><span><b>${esc(x.product.name)}</b> ${unavailable}</span><span>${num(x.qty, 0)} ${esc(x.product.unit || 'g')} · ${eur(itemCost(x.product, x.qty))}</span></div>`;
+          return `<div class="recipeIngredient"><span><b>${esc(x.product.name)}</b> <small class="recipeSource">${esc(x.priceSource || '')}</small> ${unavailable}</span><span>${num(x.qty, 0)} ${esc(x.product.unit || 'g')} · ${eur(itemCost(x.product, x.qty))}</span></div>`;
         }).join('')}
       </div>
       ${instructionsHtml}
