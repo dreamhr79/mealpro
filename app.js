@@ -1462,14 +1462,36 @@ function generateShoppingList() {
   const storeGroups = new Map();
   for (const { product: p, qty: neededQty } of itemMap.values()) {
     if (neededQty <= 0) continue;
-    const storeName = p.store || 'Ostalo / Zaliha';
-    const packSize = Number(p.pack) || 100;
-    const packsNeeded = Math.ceil(neededQty / packSize);
-    const estCost = packsNeeded * (p.price || 0);
 
+    // Shopping list optimizes the actual basket cost, not only €/100 g.
+    // For an identical EAN, evaluate how many whole packs are needed from each
+    // current offer and choose the lowest total purchase cost.
+    const candidates = Array.isArray(p.offers) && p.offers.length ? p.offers : [p];
+    let bestPurchase = null;
+    for (const offer of candidates) {
+      const packSize = Number(offer.pack) || Number(p.pack) || 100;
+      const price = Number(offer.price);
+      if (!(packSize > 0) || !(price >= 0)) continue;
+      const packsNeeded = p.unit === 'kom' ? Math.ceil(neededQty) : Math.ceil(neededQty / packSize);
+      const estCost = packsNeeded * price;
+      if (!bestPurchase || estCost < bestPurchase.estCost ||
+          (estCost === bestPurchase.estCost && getUnitValuePer100(offer) < getUnitValuePer100(bestPurchase.offer))) {
+        bestPurchase = { offer, packSize, packsNeeded, estCost };
+      }
+    }
+    if (!bestPurchase) continue;
+
+    const offer = bestPurchase.offer;
+    const storeName = offer.store || p.store || 'Ostalo / Zaliha';
     if (!storeGroups.has(storeName)) storeGroups.set(storeName, []);
     storeGroups.get(storeName).push({
-      name: p.name, neededQty, packSize, unit: p.unit || 'g', packsNeeded, pricePerPack: p.price, estCost
+      name: p.name,
+      neededQty,
+      packSize: bestPurchase.packSize,
+      unit: offer.unit || p.unit || 'g',
+      packsNeeded: bestPurchase.packsNeeded,
+      pricePerPack: Number(offer.price) || 0,
+      estCost: bestPurchase.estCost
     });
   }
   return storeGroups;
