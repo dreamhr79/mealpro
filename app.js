@@ -882,7 +882,7 @@ async function favoriteFromCatalog(cid) {
   return newFav;
 }
 
-async async function addCatalogToMeal(cid) {
+async function addCatalogToMeal(cid) {
   const f = await favoriteFromCatalog(cid);
   if (!f) return;
   meal.items.push({ product: { ...f }, qty: f.unit === 'kom' ? 1 : 100 });
