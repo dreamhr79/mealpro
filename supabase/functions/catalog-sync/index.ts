@@ -93,7 +93,15 @@ Deno.serve(async (req) => {
     const buffer = await zipRes.arrayBuffer();
     if (!buffer.byteLength) throw new Error("Downloaded archive is empty");
 
-    const chains = ["konzum","lidl","spar","plodine","tommy","eurospin","kaufland","studenac","ktc","metro","ribola","ntl"];
+    const allowedChains = ["konzum","lidl","spar","plodine","tommy","eurospin","kaufland","studenac","ktc","metro","ribola","ntl"];
+    const body = await req.json().catch(() => ({}));
+    const requested = Array.isArray(body?.chains) ? body.chains.map((x:unknown) => String(x).toLowerCase()) : [];
+    const chains = (requested.length ? requested : ["konzum","lidl","spar","plodine","tommy","kaufland"])
+      .filter((x:string, i:number, a:string[]) => allowedChains.includes(x) && a.indexOf(x) === i);
+    if (!chains.length) throw new Error("No supported chains selected");
+
+    // Only inflate files for selected chains. This keeps the worker footprint
+    // bounded and lets MealPro intentionally maintain a focused Croatian catalog.
     const files = await readZipFiles(buffer, name => chains.some(chain =>
       name === `${chain}/products.csv` || name === `${chain}/prices.csv`
     ));
@@ -104,6 +112,9 @@ Deno.serve(async (req) => {
       const prices = files[`${chain}/prices.csv`];
       if (!products || !prices) { missingChains.push(chain); continue; }
       rows.push(...parseChain(chain, products, prices));
+      // Release inflated CSV strings before moving to the next normalization step.
+      delete files[`${chain}/products.csv`];
+      delete files[`${chain}/prices.csv`];
     }
     if (!rows.length) throw new Error("Archive contains no valid catalog rows");
     if (missingChains.length) throw new Error("Incomplete archive; missing chains: " + missingChains.join(", "));
@@ -120,7 +131,7 @@ Deno.serve(async (req) => {
 
     return Response.json({
       ok:true, syncId, archiveDate:archive.date || null, archiveUrl:archive.url,
-      archiveBytes:buffer.byteLength, products:model.products.length, offers:model.offers.length,
+      archiveBytes:buffer.byteLength, chains, products:model.products.length, offers:model.offers.length,
       applied, stage:"published"
     });
   } catch (error) {
