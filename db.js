@@ -1,4 +1,4 @@
-const DB_NAME='cijeneMealProDB',DB_VER=2;
+const DB_NAME='cijeneMealProDB',DB_VER=5;
 let _db;
 function openDB(){
  if(_db)return Promise.resolve(_db);
@@ -6,17 +6,27 @@ function openDB(){
   const r=indexedDB.open(DB_NAME,DB_VER);
   r.onupgradeneeded=()=>{
    const d=r.result;
-   if(!d.objectStoreNames.contains('catalog')){
-    const cat=d.createObjectStore('catalog',{keyPath:'id'});
-    cat.createIndex('tokens','tokens',{multiEntry:true});
-    cat.createIndex('barcode','barcode');
-   }
+   // v5 removes the legacy raw catalog after migration to products + offers.
+   if(d.objectStoreNames.contains('catalog'))d.deleteObjectStore('catalog');
    if(!d.objectStoreNames.contains('favorites'))d.createObjectStore('favorites',{keyPath:'id'});
    if(!d.objectStoreNames.contains('custom'))d.createObjectStore('custom',{keyPath:'id'});
    if(!d.objectStoreNames.contains('recipes'))d.createObjectStore('recipes',{keyPath:'id'});
    if(!d.objectStoreNames.contains('meta'))d.createObjectStore('meta',{keyPath:'key'});
    if(!d.objectStoreNames.contains('nutritionOverlay'))d.createObjectStore('nutritionOverlay',{keyPath:'key'});
    if(!d.objectStoreNames.contains('priceHistory'))d.createObjectStore('priceHistory',{keyPath:'id',autoIncrement:true});
+   if(!d.objectStoreNames.contains('products')){
+    const products=d.createObjectStore('products',{keyPath:'id'});
+    products.createIndex('barcode','barcode',{unique:false});
+    products.createIndex('tokens','tokens',{multiEntry:true});
+   }else{
+    const products=r.transaction.objectStore('products');
+    if(!products.indexNames.contains('tokens'))products.createIndex('tokens','tokens',{multiEntry:true});
+   }
+   if(!d.objectStoreNames.contains('offers')){
+    const offers=d.createObjectStore('offers',{keyPath:'id'});
+    offers.createIndex('productKey','productKey',{unique:false});
+    offers.createIndex('store','store',{unique:false});
+   }
   };
   r.onsuccess=()=>{
    _db=r.result;
@@ -62,41 +72,68 @@ async function dbReplaceStore(store,rows,onProgress){
   tx.onabort=()=>rej(tx.error||Error('Transakcija zamjene baze je prekinuta.'));
  });
 }
-async function dbSearchCatalog(q,limit=80){
+async function dbSearchProducts(q,limit=80){
  const words=norm(q).split(/\s+/).filter(Boolean);
  if(!words.length)return [];
- const d=await openDB(),idx=d.transaction('catalog').objectStore('catalog').index('tokens');
+ const d=await openDB(),idx=d.transaction('products').objectStore('products').index('tokens');
  const prefix=words[0],range=IDBKeyRange.bound(prefix,prefix+'\uffff'),rows=[];
  return new Promise((res,rej)=>{
   const req=idx.openCursor(range);
   req.onsuccess=()=>{
-   const c=req.result;
-   if(!c||rows.length>=450){
-    const seen=new Set(),out=[];
+   const cur=req.result;
+   if(!cur||rows.length>=450){
+    const out=[];
     for(const x of rows){
-     if(!words.every(w=>x.search.includes(w)))continue;
-     const k=x.barcode||x.id;
-     if(seen.has(k))continue;
-     seen.add(k);out.push(x);
+     if(!words.every(w=>(x.search||'').includes(w)))continue;
+     out.push(x);
      if(out.length>=limit)break;
     }
     res(out);return;
    }
-   rows.push(c.value);c.continue();
+   rows.push(cur.value);cur.continue();
   };
-  req.onerror=()=>rej(req.error || Error('Greška pri pretraživanju kataloga.'));
+  req.onerror=()=>rej(req.error||Error('Greška pri pretraživanju proizvoda.'));
  });
 }
 
-async function dbGetOffersByBarcode(barcode){
- const code = String(barcode || '').replace(/\D/g, '');
- if (code.length < 8) return [];
- const d = await openDB();
- return new Promise(res => {
-  const req = d.transaction('catalog').objectStore('catalog').index('barcode').getAll(IDBKeyRange.only(code));
-  req.onsuccess = () => res(req.result || []);
-  req.onerror = () => res([]);
+async function dbSearchProductsWithOffers(q,limit=80){
+ const products=await dbSearchProducts(q,limit);
+ if(!products.length)return [];
+ const keys=new Set(products.map(p=>p.id));
+ const d=await openDB();
+ const grouped=new Map();
+ await new Promise((res,rej)=>{
+  const req=d.transaction('offers').objectStore('offers').openCursor();
+  req.onsuccess=()=>{
+   const cur=req.result;
+   if(!cur){res();return;}
+   const offer=cur.value;
+   if(keys.has(offer.productKey)){
+    if(!grouped.has(offer.productKey))grouped.set(offer.productKey,[]);
+    grouped.get(offer.productKey).push(offer);
+   }
+   cur.continue();
+  };
+  req.onerror=()=>rej(req.error||Error('Dohvat aktualnih ponuda nije uspio.'));
  });
+ return products.map(product=>({product,offers:grouped.get(product.id)||[]})).filter(x=>x.offers.length);
+}
+
+async function dbGetOffersByProductKey(productKey){
+ if(!productKey)return [];
+ const d=await openDB();
+ return new Promise((res,rej)=>{
+  const req=d.transaction('offers').objectStore('offers').index('productKey').getAll(IDBKeyRange.only(productKey));
+  req.onsuccess=()=>res(req.result||[]);
+  req.onerror=()=>rej(req.error||Error('Dohvat aktualnih ponuda nije uspio.'));
+ });
+}
+
+async function dbGetProductWithOffers(productKey){
+ const product=await dbGet('products',productKey);
+ if(!product)return null;
+ const offers=await dbGetOffersByProductKey(productKey);
+ return {product,offers};
 }
 
 
@@ -135,4 +172,71 @@ async function dbRestorePersonalData(dataByStore,dayPlanValue){
   tx.onerror=()=>rej(tx.error||Error('Vraćanje backupa nije uspjelo.'));
   tx.onabort=()=>rej(tx.error||Error('Vraćanje backupa je prekinuto.'));
  });
+}
+
+
+async function dbSyncCatalogModel(products,offers,syncedAt){
+ const d=await openDB();
+ const oldOffers=await dbAll('offers');
+ const oldById=new Map(oldOffers.map(o=>[o.id,o]));
+ const newIds=new Set((offers||[]).map(o=>o.id));
+ const removed=oldOffers.filter(o=>!newIds.has(o.id));
+ const changed=[];
+ for(const o of offers||[]){
+  const prev=oldById.get(o.id);
+  // The first normalized sync establishes the baseline. History records actual
+  // subsequent price/sale changes only, avoiding one history row per catalog item.
+  if(prev && (Number(prev.price)!==Number(o.price) || !!prev.onSale!==!!o.onSale)){
+   changed.push({
+    productKey:o.productKey,offerId:o.id,store:o.store,price:o.price,
+    previousPrice:Number(prev.price)||0,onSale:!!o.onSale,recordedAt:syncedAt
+   });
+  }
+ }
+ return new Promise((res,rej)=>{
+  const tx=d.transaction(['products','offers','priceHistory'],'readwrite');
+  const ps=tx.objectStore('products'),os=tx.objectStore('offers'),hs=tx.objectStore('priceHistory');
+  // Products represent the current canonical catalog. Replace their current
+  // state atomically so products that disappeared from all selected chains do
+  // not accumulate forever. Favorites/recipes keep their own user snapshots.
+  ps.clear();
+  for(const p of products||[])ps.put(p);
+  // Offers store contains current state only, so stale prices do not accumulate here.
+  os.clear();
+  for(const o of offers||[])os.put(o);
+  // History grows only when an offer is new or its effective price/sale state changed.
+  for(const h of changed)hs.add(h);
+  // A missing offer is represented by its absence from the current offers store.
+  // We do not create history rows for disappearance, keeping history price-only.
+  tx.oncomplete=()=>res({products:(products||[]).length,offers:(offers||[]).length,priceChanges:changed.length,removedOffers:removed.length});
+  tx.onerror=()=>rej(tx.error||Error('Sinkronizacija modela proizvoda i cijena nije uspjela.'));
+  tx.onabort=()=>rej(tx.error||Error('Sinkronizacija modela proizvoda i cijena je prekinuta.'));
+ });
+}
+
+
+async function dbPrunePriceHistory(maxPerOffer=30){
+ const rows=await dbAll('priceHistory');
+ if(rows.length<=maxPerOffer)return 0;
+ const groups=new Map();
+ for(const row of rows){
+  const key=row.offerId||row.productKey||'unknown';
+  if(!groups.has(key))groups.set(key,[]);
+  groups.get(key).push(row);
+ }
+ const remove=[];
+ for(const group of groups.values()){
+  group.sort((a,b)=>String(b.recordedAt||'').localeCompare(String(a.recordedAt||'')) || Number(b.id||0)-Number(a.id||0));
+  remove.push(...group.slice(maxPerOffer));
+ }
+ if(!remove.length)return 0;
+ const d=await openDB();
+ await new Promise((res,rej)=>{
+  const tx=d.transaction('priceHistory','readwrite'),os=tx.objectStore('priceHistory');
+  for(const row of remove)os.delete(row.id);
+  tx.oncomplete=res;
+  tx.onerror=()=>rej(tx.error||Error('Čišćenje povijesti cijena nije uspjelo.'));
+  tx.onabort=()=>rej(tx.error||Error('Čišćenje povijesti cijena je prekinuto.'));
+ });
+ return remove.length;
 }

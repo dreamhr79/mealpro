@@ -50,6 +50,106 @@ function nval(v) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function normalizeBarcode(value) {
+  const code = String(value ?? '').replace(/\D/g, '');
+  return code.length >= 8 ? code : '';
+}
+
+function archiveTime(archive) {
+  const candidates = [archive?.date, archive?.createdAt, archive?.created_at, archive?.timestamp];
+  for (const value of candidates) {
+    const t = Date.parse(value || '');
+    if (Number.isFinite(t)) return t;
+  }
+  const urlDate = String(archive?.url || '').match(/(20\d{2})[-_/]?(\d{2})[-_/]?(\d{2})/);
+  return urlDate ? Date.UTC(Number(urlDate[1]), Number(urlDate[2]) - 1, Number(urlDate[3])) : 0;
+}
+
+function newestArchive(archives) {
+  const valid = (Array.isArray(archives) ? archives : []).filter(a => a?.url);
+  return valid.sort((a, b) => archiveTime(b) - archiveTime(a))[0] || null;
+}
+
+function canonicalProductKey(product) {
+  const barcode = normalizeBarcode(product?.barcode);
+  if (barcode) return `ean:${barcode}`;
+  // Products without EAN must not collide across chains when external ids overlap.
+  // Prefer the already chain-qualified row id; only then fall back to external id.
+  const sourceId = String(product?.id || product?.externalId || '').trim();
+  return sourceId ? `source:${sourceId}` : '';
+}
+
+function offerFromCatalogRow(row) {
+  return {
+    id: row.id,
+    productKey: canonicalProductKey(row),
+    store: row.store || '',
+    price: Number(row.price) || 0,
+    pack: Number(row.pack) || 0,
+    unit: row.unit || 'kom',
+    pricePer100: Number.isFinite(Number(row.pricePer100)) ? Number(row.pricePer100) : null,
+    onSale: !!row.onSale
+  };
+}
+
+function sortOffersByPrice(offers) {
+  return [...offers].sort((a, b) => {
+    const ap = Number(a.price), bp = Number(b.price);
+    const aHas = Number.isFinite(ap) && ap > 0, bHas = Number.isFinite(bp) && bp > 0;
+    if (aHas && bHas && ap !== bp) return ap - bp;
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    return getUnitValuePer100(a) - getUnitValuePer100(b);
+  });
+}
+
+function favoriteOfferSnapshot(rows) {
+  return sortOffersByPrice(rows).map(offerFromCatalogRow);
+}
+
+function canonicalProductFromCatalogRow(row) {
+  const productKey = canonicalProductKey(row);
+  return {
+    id: productKey,
+    barcode: normalizeBarcode(row.barcode),
+    name: row.name || '',
+    brand: row.brand || '',
+    pack: Number(row.pack) || 0,
+    unit: row.unit || 'kom',
+    search: row.search || norm(`${row.name || ''} ${row.brand || ''} ${normalizeBarcode(row.barcode)}`),
+    tokens: Array.isArray(row.tokens) ? row.tokens : tokens(row.search || row.name || '')
+  };
+}
+
+function buildNormalizedCatalogModel(rows) {
+  const products = new Map();
+  const offersById = new Map();
+  for (const row of rows || []) {
+    const product = canonicalProductFromCatalogRow(row);
+    if (!product.id) continue;
+
+    // One canonical product per identity. Prefer the richer/newer row when the
+    // same EAN appears with missing metadata in another chain.
+    const existing = products.get(product.id);
+    if (!existing) {
+      products.set(product.id, product);
+    } else {
+      const merged = { ...existing };
+      if (!merged.name && product.name) merged.name = product.name;
+      if (!merged.brand && product.brand) merged.brand = product.brand;
+      if (!(Number(merged.pack) > 0) && Number(product.pack) > 0) merged.pack = product.pack;
+      if ((!merged.unit || merged.unit === 'kom') && product.unit && product.unit !== 'kom') merged.unit = product.unit;
+      merged.search = norm(`${merged.name || ''} ${merged.brand || ''} ${merged.barcode || ''}`);
+      merged.tokens = tokens(merged.search);
+      products.set(product.id, merged);
+    }
+
+    const offer = offerFromCatalogRow(row);
+    const prev = offersById.get(offer.id);
+    if (!prev || (offer.price > 0 && offer.price < prev.price)) offersById.set(offer.id, offer);
+  }
+  return { products: [...products.values()], offers: [...offersById.values()] };
+}
+
 function packFromName(name) {
   const s = String(name || '').toLowerCase().replace(/,/g, '.').replace(/\s+/g, ' ').trim();
   if (!s) return null;
@@ -138,16 +238,16 @@ function resolveMealItemProduct(it) {
   if (!it) return { id: id(), name: 'Nepoznato', pack: 100, unit: 'g', price: 0, kcal: 0, protein: 0, carbs: 0, fat: 0 };
   const snapshot = it.product && typeof it.product === 'object' ? it.product : null;
   const productId = it.productId != null ? String(it.productId) : '';
-  const barcode = String(snapshot?.barcode || it.barcode || '').trim();
+  const barcode = normalizeBarcode(snapshot?.barcode || it.barcode);
 
   // Always prefer the current persisted product over the recipe/day-plan snapshot.
   // This keeps prices and macros live after a favorite is refreshed by catalog sync.
   let p = favorites.find(f =>
     (productId && (String(f.id) === productId || String(f.catalogId) === productId)) ||
-    (barcode && String(f.barcode || '') === barcode)
+    (barcode && normalizeBarcode(f.barcode) === barcode)
   ) || custom.find(c =>
     (productId && String(c.id) === productId) ||
-    (barcode && String(c.barcode || '') === barcode)
+    (barcode && normalizeBarcode(c.barcode) === barcode)
   ) || snapshot;
 
   if (!p) {
@@ -171,7 +271,8 @@ function repairProductPackage(p) {
   // Ako je jedinica 'kom', ali u nazivu ima npr. "500 g", "1 l", "150g", "400ml" etc.
   if (p.unit === 'kom' || !p.unit || Number(p.pack) <= 1) {
     const fn = packFromName(p.name);
-    if (fn && fn.pack >= 5) {
+    const validNamedPack = fn && ((fn.unit === 'kom' && fn.pack >= 1) || fn.pack >= 5);
+    if (validNamedPack) {
       p.pack = fn.pack;
       p.unit = fn.unit;
       if (p.price > 0 && p.pack > 0 && (p.unit === 'g' || p.unit === 'ml')) {
@@ -256,13 +357,20 @@ async function loadAll() {
 }
 
 // Tabs
-$$('#tabs button').forEach(b => b.onclick = () => {
-  $$('#tabs button').forEach(x => x.classList.remove('active'));
-  b.classList.add('active');
-  $$('.view').forEach(v => v.classList.remove('active'));
-  $('#' + b.dataset.tab).classList.add('active');
-  if (b.dataset.tab === 'shoplist') renderShoppingList();
-});
+function activateTab(tab) {
+  const target = $('#tabs button[data-tab="' + tab + '"]');
+  if (!target) return;
+  $('#tabs button').forEach(x => x.classList.toggle('active', x.dataset.tab === tab));
+  $('.view').forEach(v => v.classList.toggle('active', v.id === tab));
+  $('#mobileBottomNav [data-mobile-tab]').forEach(x => x.classList.toggle('active', x.dataset.mobileTab === tab));
+  if (tab === 'shoplist') renderShoppingList();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+$('#tabs button').forEach(b => b.onclick = () => activateTab(b.dataset.tab));
+$('#mobileBottomNav [data-mobile-tab]').forEach(b => b.onclick = () => activateTab(b.dataset.mobileTab));
+const mobileMoreBtn = $('#mobileMoreBtn');
+if (mobileMoreBtn) mobileMoreBtn.onclick = () => $('#hamburgerBtn')?.click();
 
 // Picker Tabs inside Creator
 $$('.pickerTabs button').forEach(b => b.onclick = () => {
@@ -500,7 +608,7 @@ $('#addMealToDayPlan').onclick = async () => {
   }
   renderDayPlan();
   showToast(`Obrok "${name}" je dodan u Dnevni plan!`);
-  $('#tabs button[data-tab="dayplan"]').click();
+  activateTab('dayplan');
 };
 
 function renderPicker() {
@@ -697,7 +805,12 @@ async function searchCatalog(inp, out) {
   
   // Uvijek osvježi najnovije favorite iz baze prije prikaza
   favorites = await dbAll('favorites');
-  const rows = await dbSearchCatalog(q, 150);
+  const normalizedRows = await dbSearchProductsWithOffers(q, 150);
+  const rows = normalizedRows.map(({ product, offers }) => {
+    const sorted = sortOffersByPrice(offers);
+    const best = sorted[0];
+    return { ...product, ...best, id: best.id, barcode: product.barcode, name: product.name, brand: product.brand, pack: product.pack || best.pack, unit: product.unit || best.unit, _offers: sorted };
+  });
 
   // Group search results by barcode (or product identity) so user gets 1 entry with all store offers
   const groupMap = new Map();
@@ -713,11 +826,13 @@ async function searchCatalog(inp, out) {
         }
       }
     }
-    const key = (item.barcode && String(item.barcode).replace(/\D/g, '').length >= 8) 
-      ? `ean:${String(item.barcode).replace(/\D/g, '')}` 
-      : `txt:${norm(item.name)}|${item.pack}|${item.unit}`;
+    const key = canonicalProductKey(item);
     if (!groupMap.has(key)) groupMap.set(key, []);
-    groupMap.get(key).push(item);
+    const normalizedOffers = Array.isArray(item._offers) && item._offers.length ? item._offers.map(o => ({
+      ...item, ...o, id: o.id, barcode: item.barcode, name: item.name, brand: item.brand,
+      pack: item.pack || o.pack, unit: item.unit || o.unit
+    })) : [item];
+    groupMap.get(key).push(...normalizedOffers);
   }
 
   // Find best offer in each group and sort groups by value per 100g (cheapest per gram first)
@@ -735,7 +850,7 @@ async function searchCatalog(inp, out) {
       return (Number(a.price) || 0) - (Number(b.price) || 0);
     });
     const best = items[0];
-    groupedProducts.push({ best, offers: items });
+    groupedProducts.push({ best, offers: items, productKey: key });
   }
 
   groupedProducts.sort((a, b) => {
@@ -746,24 +861,21 @@ async function searchCatalog(inp, out) {
   });
 
   // Pouzdana provjera je li artikl u favoritima po barkodu ili ponudama
-  function isProductInFavorites(p, offers = []) {
-    const pCode = String(p.barcode || '').replace(/\D/g, '');
+  function isProductInFavorites(p, offers = [], productKey = canonicalProductKey(p)) {
+    const pCode = normalizeBarcode(p.barcode);
     const offerIds = new Set(offers.map(o => o.id));
-    offerIds.add(p.id);
 
     return favorites.some(f => {
-      const fCode = String(f.barcode || '').replace(/\D/g, '');
-      if (pCode.length >= 8 && fCode.length >= 8 && pCode === fCode) return true;
-      if (f.id && f.id.startsWith('ean:') && f.id.replace(/\D/g, '') === pCode) return true;
-      if (offerIds.has(f.catalogId) || offerIds.has(f.id)) return true;
-      if (f.offers && f.offers.some(fo => offerIds.has(fo.id) || (fo.store === p.store && Math.abs(fo.price - p.price) < 0.01))) return true;
-      if (norm(f.name) === norm(p.name) && String(f.pack) === String(p.pack) && f.unit === p.unit) return true;
-      return false;
+      if (productKey && f.id === productKey) return true;
+      const fCode = normalizeBarcode(f.barcode);
+      if (pCode && fCode === pCode) return true;
+      if (offerIds.has(f.catalogId)) return true;
+      return Array.isArray(f.offers) && f.offers.some(fo => offerIds.has(fo.id));
     });
   }
 
-  out.innerHTML = groupedProducts.length ? groupedProducts.map(({ best: p, offers }) => {
-    const isFav = isProductInFavorites(p, offers);
+  out.innerHTML = groupedProducts.length ? groupedProducts.map(({ best: p, offers, productKey }) => {
+    const isFav = isProductInFavorites(p, offers, productKey);
     const unitVal = formatUnitValue(p);
     const multiStore = (offers.length > 1) ? ` <span class="pill" style="font-size:11px">${offers.length} trgovine</span>` : '';
     const saleTag = p.onSale ? '<span class="saleBadgeMini">🔥 AKCIJA</span>' : '';
@@ -785,10 +897,10 @@ async function searchCatalog(inp, out) {
       </div>
       <div class="meta">${p.pricePer100 ? eur(p.pricePer100) + ' / 100' : ''}</div>
       <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
-        <button class="favFromCatalog ${isFav ? 'isFavoriteBtn' : ''}" data-id="${esc(p.id)}" title="${isFav ? 'Već je u favoritima (klikni za ažuriranje ponuda)' : 'Dodaj u favorite'}">
+        <button class="favFromCatalog ${isFav ? 'isFavoriteBtn' : ''}" data-id="${esc(productKey)}" title="${isFav ? 'Već je u favoritima (klikni za ažuriranje ponuda)' : 'Dodaj u favorite'}">
           ${isFav ? '★ U favoritima' : '☆ U favorite'}
         </button>
-        <button class="secondary baseToMeal" data-id="${esc(p.id)}">+ Obrok</button>
+        <button class="secondary baseToMeal" data-id="${esc(productKey)}">+ Obrok</button>
       </div>
     </div>`;
   }).join('') : '<div class="empty">Nema rezultata za traženi pojam.</div>';
@@ -799,57 +911,32 @@ $('#catalogSearch').onkeydown = e => { if (e.key === 'Enter') searchCatalog(e.ta
 $('#creatorCatalogBtn').onclick = () => searchCatalog($('#creatorCatalogSearch'), $('#creatorCatalogResults'));
 $('#creatorCatalogSearch').onkeydown = e => { if (e.key === 'Enter') searchCatalog(e.target, $('#creatorCatalogResults')); };
 
-async function favoriteFromCatalog(cid) {
-  const p = await dbGet('catalog', cid);
-  if (!p) return;
+async function favoriteFromCatalog(productKey) {
+  const normalized = await dbGetProductWithOffers(productKey);
+  if (!normalized?.product || !normalized.offers?.length) return;
 
-  // Dohvati sve ponude za ovaj barkod kako bi u favoritima imali usporedbu svih trgovina
-  let allOffers = [p];
-  if (p.barcode && p.barcode.length >= 8) {
-    const barcodeOffers = await dbGetOffersByBarcode(p.barcode);
-    if (barcodeOffers && barcodeOffers.length) {
-      allOffers = barcodeOffers;
-    }
-  }
-
-  // Isti EAN predstavlja isti fizički proizvod/pakiranje, pa je za favorita
-  // relevantna najniža cijena pakiranja. €/100 g ostaje informativna metrika
-  // za usporedbu različitih proizvoda i veličina pakiranja.
-  allOffers.sort((a, b) => {
-    const ap = Number(a.price), bp = Number(b.price);
-    const aHas = Number.isFinite(ap) && ap > 0, bHas = Number.isFinite(bp) && bp > 0;
-    if (aHas && bHas && ap !== bp) return ap - bp;
-    if (aHas !== bHas) return aHas ? -1 : 1;
-    return getUnitValuePer100(a) - getUnitValuePer100(b);
-  });
-
+  const p = normalized.product;
+  const allOffers = sortOffersByPrice(normalized.offers);
   const bestOffer = allOffers[0];
 
-  // Provjera postoji li već favorit s istim barkodom ili istim ID-om
-  const existingFav = favorites.find(f => 
-    (p.barcode && f.barcode && String(f.barcode) === String(p.barcode)) ||
-    f.catalogId === p.id ||
-    f.id === (p.barcode ? `ean:${p.barcode}` : `base:${p.id}`)
+  const existingFav = favorites.find(f =>
+    f.id === productKey ||
+    (normalizeBarcode(p.barcode) && normalizeBarcode(f.barcode) === normalizeBarcode(p.barcode)) ||
+    f.catalogId === bestOffer.id
   );
 
   if (existingFav) {
-    // Spriječi dupliciranje i ažuriraj ponude trgovina i najnižu cijenu.
-    // Sačuvaj ručno unesene makrose/kategoriju, ali propagiraj novu cijenu
-    // kroz postojeće recepte i dnevni plan.
     existingFav.catalogId = bestOffer.id;
-    existingFav.name = bestOffer.name || existingFav.name;
-    existingFav.brand = bestOffer.brand || existingFav.brand || '';
+    existingFav.name = p.name || existingFav.name;
+    existingFav.brand = p.brand || existingFav.brand || '';
     existingFav.barcode = p.barcode || existingFav.barcode || '';
     existingFav.price = bestOffer.price;
     existingFav.store = bestOffer.store;
-    existingFav.pack = bestOffer.pack;
-    existingFav.unit = bestOffer.unit;
+    existingFav.pack = p.pack || bestOffer.pack;
+    existingFav.unit = p.unit || bestOffer.unit;
     existingFav.pricePer100 = bestOffer.pricePer100;
     existingFav.onSale = bestOffer.onSale;
-    existingFav.offers = allOffers.map(o => ({
-      id: o.id, store: o.store, price: o.price, pack: o.pack, unit: o.unit,
-      pricePer100: o.pricePer100, onSale: o.onSale
-    }));
+    existingFav.offers = favoriteOfferSnapshot(allOffers);
     await dbPut('favorites', existingFav);
     await propagateProductUpdate(existingFav);
     await loadAll();
@@ -857,28 +944,23 @@ async function favoriteFromCatalog(cid) {
     return existingFav;
   }
 
-  const fid = p.barcode ? `ean:${p.barcode}` : `base:${p.id}`;
   const newFav = {
-    id: fid,
+    id: productKey,
     catalogId: bestOffer.id,
     barcode: p.barcode || '',
-    name: bestOffer.name,
-    brand: bestOffer.brand || '',
-    pack: bestOffer.pack,
-    unit: bestOffer.unit,
+    name: p.name || '',
+    brand: p.brand || '',
+    pack: p.pack || bestOffer.pack,
+    unit: p.unit || bestOffer.unit,
     price: bestOffer.price,
     store: bestOffer.store,
     pricePer100: bestOffer.pricePer100,
     onSale: bestOffer.onSale,
-    offers: allOffers.map(o => ({
-      id: o.id, store: o.store, price: o.price, pack: o.pack, unit: o.unit,
-      pricePer100: o.pricePer100, onSale: o.onSale
-    })),
+    offers: favoriteOfferSnapshot(allOffers),
     kcal: 0, protein: 0, carbs: 0, fat: 0,
     addedAt: new Date().toISOString()
   };
 
-  // Automatski povuci makrose ako postoji barkod
   if (p.barcode) {
     showToast('Dohvaćam nutritivne podatke preko Open Food Facts…');
     const off = await fetchOffMacros(p.barcode);
@@ -896,12 +978,11 @@ async function favoriteFromCatalog(cid) {
   showToast(`${newFav.name} je dodan u Favorite (najniža cijena: ${eur(newFav.price)} u ${newFav.store}).`);
   return newFav;
 }
-
 async function addCatalogToMeal(cid) {
   const f = await favoriteFromCatalog(cid);
   if (!f) return;
   meal.items.push({ product: { ...f }, qty: f.unit === 'kom' ? 1 : 100 });
-  $('#tabs button[data-tab="creator"]').click();
+  activateTab('creator');
   renderMeal();
 }
 
@@ -1251,7 +1332,7 @@ function loadRecipe(rid) {
   $('#mealName').value = r.name;
   $('#mealServings').value = r.servings || 1;
   updateEditingBanner();
-  $('#tabs button[data-tab="creator"]').click();
+  activateTab('creator');
   renderMeal();
   showToast(`Otvoren recept: "${r.name}". Promjene će ga ažurirati.`);
 }
@@ -1738,9 +1819,10 @@ $('#syncStart').onclick = async () => {
     log('Dohvaćam popis arhiva s api.cijene.dev…');
     const lr = await fetchWithCorsFallback('https://api.cijene.dev/v0/list');
     if (!lr.ok) throw Error('HTTP ' + lr.status);
-    const list = await lr.json(), latest = list.archives?.[0];
+    const list = await lr.json(), latest = newestArchive(list.archives);
     if (!latest?.url) throw Error('Nema dostupnih arhiva.');
 
+    const usingManualZip = !!manualZipBuffer;
     let buf = manualZipBuffer;
     if (!buf) {
       log(`Preuzimam arhivu ${latest.date}…`);
@@ -1756,9 +1838,13 @@ $('#syncStart').onclick = async () => {
     const files = await readZipFiles(buf, wanted);
 
     const all = [];
+    const missingChains = [];
     for (const chain of chains) {
       const pt = files[`${chain}/products.csv`], pr = files[`${chain}/prices.csv`];
-      if (!pt || !pr) continue;
+      if (!pt || !pr) {
+        missingChains.push(CHAINS[chain] || chain);
+        continue;
+      }
       log(`Obrađujem ${CHAINS[chain]}…`);
       const prices = parseCsv(pr), best = new Map();
       for (let i = 1; i < prices.length; i++) {
@@ -1776,7 +1862,7 @@ $('#syncStart').onclick = async () => {
       for (let i = 1; i < products.length; i++) {
         const c = products[i], pid = (c[0] || '').trim(), name = (c[2] || '').trim(), bp = best.get(pid);
         if (!pid || !name || !bp) continue;
-        const pu = calcSmartPack(c[6], c[5], name, bp.price, bp.ppu), barcode = (c[1] || '').trim(), search = norm(`${name} ${c[3] || ''} ${barcode}`);
+        const pu = calcSmartPack(c[6], c[5], name, bp.price, bp.ppu), barcode = normalizeBarcode(c[1]), search = norm(`${name} ${c[3] || ''} ${barcode}`);
         all.push({
           id: `${chain}:${pid}`, externalId: pid, barcode, name,
           brand: (c[3] || '').trim(), pack: pu.pack, unit: pu.unit, price: bp.price,
@@ -1787,63 +1873,69 @@ $('#syncStart').onclick = async () => {
     }
 
     if (!all.length) throw Error('U odabranim lancima nisu pronađeni valjani artikli. Postojeća baza nije promijenjena.');
-    log(`Spremam ${all.length.toLocaleString('hr-HR')} artikala u bazu…`);
-    // Clear + insert happen in one IndexedDB transaction. If any catalog write
-    // fails, the previous working catalog remains intact.
-    await dbReplaceStore('catalog', all, (n, t) => log(`Spremanje: ${n.toLocaleString('hr-HR')} / ${t.toLocaleString('hr-HR')}`));
+    if (missingChains.length) log(`Upozorenje: ZIP nema potpune CSV podatke za: ${missingChains.join(', ')}. Ti lanci nisu ažurirani.`);
+    // Build the normalized model directly. We no longer persist the raw
+    // per-store catalog, avoiding a duplicate copy of the same cijene.dev data.
+    const normalized = buildNormalizedCatalogModel(all);
+    if (!normalized.products.length || !normalized.offers.length) {
+      throw Error('Normalizacija nije proizvela valjane proizvode i ponude. Postojeća baza nije promijenjena.');
+    }
+    const invalidOffers = normalized.offers.filter(o => !o.productKey || !(Number(o.price) > 0));
+    if (invalidOffers.length) {
+      throw Error(`Normalizacija je pronašla ${invalidOffers.length} nevaljanih ponuda. Postojeća baza nije promijenjena.`);
+    }
+    log(`Spremam ${normalized.products.length.toLocaleString('hr-HR')} proizvoda i ${normalized.offers.length.toLocaleString('hr-HR')} aktualnih ponuda…`);
+    const syncStamp = new Date().toISOString();
+    const modelStats = await dbSyncCatalogModel(normalized.products, normalized.offers, syncStamp);
+    const prunedHistory = await dbPrunePriceHistory(30);
+    log(`Model: ${modelStats.products.toLocaleString('hr-HR')} proizvoda · ${modelStats.offers.toLocaleString('hr-HR')} aktualnih ponuda · ${modelStats.priceChanges.toLocaleString('hr-HR')} promjena cijene · ${modelStats.removedOffers.toLocaleString('hr-HR')} nestalih ponuda`);
+    if (prunedHistory) log(`Povijest cijena: uklonjeno ${prunedHistory.toLocaleString('hr-HR')} zastarjelih zapisa (zadržano najviše 30 promjena po ponudi).`);
 
-    // Osvježi cijene postojećih favorita. EAN je kanonski identitet proizvoda:
-    // isti fizički proizvod iz više trgovina ostaje jedan favorit s više ponuda.
-    const byId = new Map(all.map(p => [p.id, p]));
-    const byBarcode = new Map();
-    for (const p of all) {
-      const barcode = String(p.barcode || '').trim();
-      if (!barcode) continue;
-      if (!byBarcode.has(barcode)) byBarcode.set(barcode, []);
-      byBarcode.get(barcode).push(p);
+    // Refresh favorites from the normalized in-memory model without rebuilding
+    // a second raw catalog copy.
+    const productByKey = new Map(normalized.products.map(p => [p.id, p]));
+    const offersByKey = new Map();
+    for (const offer of normalized.offers) {
+      if (!offersByKey.has(offer.productKey)) offersByKey.set(offer.productKey, []);
+      offersByKey.get(offer.productKey).push(offer);
     }
     for (const f of favorites) {
-      let offers = [];
-      const barcode = String(f.barcode || '').trim();
-      if (barcode && byBarcode.has(barcode)) offers = byBarcode.get(barcode);
-      else {
-        const cur = byId.get(f.catalogId);
-        if (cur) offers = [cur];
-      }
-      if (!offers.length) continue;
-
-      offers.sort((a, b) => {
-        const ap = Number(a.price), bp = Number(b.price);
-        const aHas = Number.isFinite(ap) && ap > 0, bHas = Number.isFinite(bp) && bp > 0;
-        if (aHas && bHas && ap !== bp) return ap - bp;
-        if (aHas !== bHas) return aHas ? -1 : 1;
-        return getUnitValuePer100(a) - getUnitValuePer100(b);
-      });
+      const productKey = f.id?.startsWith('ean:') || f.id?.startsWith('source:')
+        ? f.id
+        : (normalizeBarcode(f.barcode) ? `ean:${normalizeBarcode(f.barcode)}` : '');
+      if (!productKey) continue;
+      const product = productByKey.get(productKey);
+      let offers = offersByKey.get(productKey) || [];
+      if (!product || !offers.length) continue;
+      offers = sortOffersByPrice(offers);
       const best = offers[0];
       Object.assign(f, {
         catalogId: best.id,
-        barcode: best.barcode || f.barcode || '',
-        name: best.name || f.name,
-        brand: best.brand || f.brand || '',
+        barcode: product.barcode || f.barcode || '',
+        name: product.name || f.name,
+        brand: product.brand || f.brand || '',
         price: best.price,
         store: best.store,
-        pack: best.pack,
-        unit: best.unit,
+        pack: product.pack || best.pack,
+        unit: product.unit || best.unit,
         pricePer100: best.pricePer100,
         onSale: best.onSale,
-        offers: offers.map(o => ({
-          id: o.id, store: o.store, price: o.price, pack: o.pack, unit: o.unit,
-          pricePer100: o.pricePer100, onSale: o.onSale
-        }))
+        offers: favoriteOfferSnapshot(offers)
       });
       await dbPut('favorites', f);
       await propagateProductUpdate(f);
     }
 
-    await dbPut('meta', { key: 'sync', date: latest.date, count: all.length, syncedAt: new Date().toISOString() });
+    await dbPut('meta', { key: 'sync', date: latest.date || null, archiveUrl: latest.url || null, count: all.length, products: modelStats.products, offers: modelStats.offers, priceChanges: modelStats.priceChanges, removedOffers: modelStats.removedOffers, missingChains, source: usingManualZip ? 'manual-zip' : 'cijene.dev', schemaVersion: 2, syncedAt: syncStamp });
     await loadAll();
     log(`Gotovo! Baza sadrži ${all.length.toLocaleString('hr-HR')} ažuriranih artikala.`);
-    showToast('Baza cijena je uspješno ažurirana!');
+    if (usingManualZip) {
+      manualZipBuffer = null;
+      const manualInput = $('#manualZip');
+      if (manualInput) manualInput.value = '';
+      log('Ručni ZIP je potrošen i uklonjen iz memorije.');
+    }
+    showToast(missingChains.length ? 'Baza je ažurirana, ali dio odabranih lanaca nije bio dostupan u ZIP-u.' : 'Baza cijena je uspješno ažurirana!');
     setTimeout(() => $('#syncDialog').close(), 1200);
   } catch (err) {
     console.error(err);
@@ -2280,7 +2372,7 @@ $('#igSaveBtn').onclick = async () => {
     renderRecipes();
     $('#recipeCount').textContent = `(${recipes.length})`;
     showToast(`Recept "${title}" je uspješno spremljen s uputama i makrosima!`);
-    $('#tabs button[data-tab="recipes"]').click();
+    activateTab('recipes');
   } catch (err) {
     console.error('Instagram recipe save error:', err);
     showToast('Spremanje uvezenog recepta nije uspjelo.');
@@ -2300,7 +2392,7 @@ $('#igOpenInCreatorBtn').onclick = async () => {
   updateEditingBanner();
   renderMeal();
   showToast('Recept je otvoren u Kreatoru obroka!');
-  $('#tabs button[data-tab="creator"]').click();
+  activateTab('creator');
 };
 
 // === BACKUP (IMPORT / EXPORT JSON) ===

@@ -281,3 +281,55 @@ main {
     box-shadow: none;
   }
 }
+
+/* Mobile app shell — shared by web/PWA and future Android wrapper */
+#mobileBottomNav{display:none}
+@media(max-width:850px){
+  body{padding-bottom:calc(78px + env(safe-area-inset-bottom))}
+  header{
+    position:sticky;top:0;z-index:40;
+    padding-top:max(10px,env(safe-area-inset-top));
+    backdrop-filter:saturate(160%) blur(12px);
+  }
+  header .sub{display:none}
+  header h1{font-size:18px;line-height:1.2}
+  #syncState{display:none}
+  #quickSyncBtn{padding:8px 10px!important;font-size:0!important}
+  #quickSyncBtn::after{content:'🔄';font-size:18px}
+  main{padding:12px 10px 20px}
+  .viewHead{align-items:flex-start;gap:10px}
+  .viewHead h2{font-size:22px;margin-bottom:4px}
+  .viewHead p{font-size:13px;line-height:1.45}
+  .card{border-radius:16px;padding:14px;box-shadow:0 2px 12px rgba(15,23,42,.06)}
+  input,select,textarea{font-size:16px!important;min-height:44px}
+  button{min-height:44px;touch-action:manipulation}
+  .searchRow{grid-template-columns:1fr}
+  .searchRow button{width:100%}
+  .totals{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .totals>div:last-child:nth-child(odd){grid-column:1/-1}
+  #daySummary{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  #mobileBottomNav{
+    display:grid;grid-template-columns:repeat(5,1fr);
+    position:fixed;left:0;right:0;bottom:0;z-index:1000;
+    padding:6px 6px calc(6px + env(safe-area-inset-bottom));
+    background:rgba(255,255,255,.96);
+    border-top:1px solid var(--line);
+    box-shadow:0 -8px 24px rgba(15,23,42,.08);
+    backdrop-filter:saturate(160%) blur(14px);
+  }
+  #mobileBottomNav button{
+    min-width:0;min-height:54px;padding:5px 2px;border:0;background:transparent;
+    color:var(--muted);border-radius:12px;box-shadow:none;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  }
+  #mobileBottomNav button span{font-size:20px;line-height:1}
+  #mobileBottomNav button small{font-size:10px;font-weight:800}
+  #mobileBottomNav button.active{background:var(--pill);color:var(--accent)}
+  .toast{left:12px;right:12px;bottom:calc(78px + env(safe-area-inset-bottom));max-width:none}
+  dialog{max-height:calc(100dvh - 24px);overflow:auto}
+}
+@media(max-width:420px){
+  .viewHead{display:block}
+  .viewHead>button,.viewHead>div+button{width:100%;margin-top:10px}
+  .productRow{padding:12px 4px}
+}

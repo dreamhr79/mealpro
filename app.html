@@ -2,7 +2,9 @@
 <html lang="hr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#ffffff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>CijeneMeal Pro v3.2.8</title>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -21,7 +23,7 @@
  </div>
 </header>
 
-<nav id="tabs">
+<nav id="tabs" aria-label="Glavna navigacija">
  <button data-tab="creator" class="active">🍽️ Kreator obroka</button>
  <button data-tab="dayplan">🧩 Dnevni plan</button>
  <button data-tab="shoplist">🛒 Popis za kupovinu</button>
@@ -31,6 +33,13 @@
  <button data-tab="recipes">📖 Recepti <span id="recipeCount"></span></button>
  <button data-tab="importerTab">📥 Instagram uvoz</button>
  <button data-tab="backupTab">💾 Backup</button>
+</nav>
+<nav id="mobileBottomNav" aria-label="Mobilna navigacija">
+ <button data-mobile-tab="creator" class="active"><span>🍽️</span><small>Obrok</small></button>
+ <button data-mobile-tab="dayplan"><span>🧩</span><small>Dan</small></button>
+ <button data-mobile-tab="shoplist"><span>🛒</span><small>Kupnja</small></button>
+ <button data-mobile-tab="favorites"><span>⭐</span><small>Favoriti</small></button>
+ <button id="mobileMoreBtn" type="button"><span>☰</span><small>Više</small></button>
 </nav>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
