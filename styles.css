@@ -362,3 +362,9 @@ main {
   .recipeIngredient{align-items:flex-start}
   .recipeIngredient span:last-child{white-space:nowrap}
 }
+
+.recipePriceMeta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px;font-size:11px;color:var(--muted)}
+.recipeTrend{font-weight:800;border-radius:999px;padding:2px 7px;background:#eef2f6}
+.recipeTrend.up{color:#a63b27;background:#fff0ec}
+.recipeTrend.down{color:#087a55;background:#eaf8f2}
+.recipeTrend.flat{color:var(--muted)}
