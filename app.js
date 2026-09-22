@@ -831,6 +831,14 @@ document.addEventListener('click', async e => {
       }
     }
   }
+  if (b.classList.contains('recipeFindAlternatives')) {
+    b.disabled = true;
+    const oldText = b.textContent;
+    b.textContent = 'Tražim…';
+    await refreshCatalogRecipeAlternatives(b.dataset.id);
+    b.disabled = false;
+    b.textContent = oldText;
+  }
   if (b.classList.contains('recipeDayPlan')) await addRecipeToDayPlan(b.dataset.id, 1);
   if (b.classList.contains('recipeScale')) loadScaledRecipe(b.dataset.id, b.dataset.servings);
   if (b.classList.contains('recipeScaleCustom')) {
@@ -1440,13 +1448,64 @@ function cheaperRecipeAlternative(product) {
   return candidates[0] || null;
 }
 
+const recipeCatalogAlternatives = new Map();
+
+function recipeAlternativeQuery(product) {
+  const kind = recipeProductKind(product);
+  const queries = {
+    'greek-yogurt': 'grčki jogurt', skyr: 'skyr', yogurt: 'jogurt', cottage: 'cottage sir',
+    'chicken-breast': 'pileća prsa', 'turkey-breast': 'pureća prsa', tuna: 'tuna',
+    salmon: 'losos', whey: 'whey', casein: 'kazein', eggs: 'jaja', oats: 'zobene',
+    rice: 'riža', pasta: 'tjestenina', bread: 'kruh'
+  };
+  return queries[kind] || tokens(product?.name || '').filter(w => w.length >= 4).slice(0, 2).join(' ');
+}
+
+async function findCatalogRecipeAlternative(product) {
+  if (!CatalogRepository.isOnline()) return null;
+  const q = recipeAlternativeQuery(product);
+  if (!q || q.length < 2) return null;
+  try {
+    const rows = await CatalogRepository.search(q, 80);
+    const currentValue = getUnitValuePer100(product);
+    const candidates = (rows || []).map(({ product: p, offers }) => {
+      const sorted = sortOffersByPrice(offers || []);
+      const best = sorted[0];
+      if (!best) return null;
+      const candidate = repairProductPackage({ ...p, ...best, id: best.id, catalogId: best.id, offers: favoriteOfferSnapshot(sorted), catalogAvailable: true });
+      const aCode = normalizeBarcode(product.barcode), bCode = normalizeBarcode(candidate.barcode);
+      if ((aCode && bCode && aCode === bCode) || !comparableRecipeProduct(product, candidate)) return null;
+      return { product: candidate, source: 'Baza', value: getUnitValuePer100(candidate) };
+    }).filter(Boolean).filter(x => Number.isFinite(x.value) && x.value > 0 && x.value < currentValue * 0.995).sort((a,b) => a.value - b.value);
+    return candidates[0] || null;
+  } catch (err) {
+    console.warn('Catalog recipe alternative lookup failed.', err);
+    return null;
+  }
+}
+
+async function refreshCatalogRecipeAlternatives(recipeId) {
+  const recipe = recipes.find(r => r.id === recipeId);
+  if (!recipe) return;
+  const live = recipeLiveState(recipe);
+  let changed = false;
+  for (const item of live.items) {
+    if (item.cheaperAlternative) continue;
+    const key = `${recipe.id}:${item.productId}`;
+    const alt = await findCatalogRecipeAlternative(item.product);
+    if (alt) { recipeCatalogAlternatives.set(key, alt); changed = true; }
+  }
+  if (changed) renderRecipes();
+}
+
 function recipeLiveState(recipe) {
   const items = (Array.isArray(recipe?.items) ? recipe.items : [])
     .filter(it => Number(it?.qty) > 0)
     .map(it => {
       const preferred = preferredRecipeProduct(it);
       const product = preferred.product;
-      return { ...it, productId: product.id || it.productId || null, product, priceSource: preferred.source, cheaperAlternative: cheaperRecipeAlternative(product) };
+      const productId = product.id || it.productId || null;
+      return { ...it, productId, product, priceSource: preferred.source, cheaperAlternative: cheaperRecipeAlternative(product) || recipeCatalogAlternatives.get(`${recipe.id}:${productId}`) || null };
     });
   const servings = Math.max(1, Number(recipe?.servings) || 1);
   let totals = { kcal: 0, protein: 0, carbs: 0, fat: 0, cost: 0 };
@@ -1596,6 +1655,7 @@ function renderRecipes() {
           <button class="secondary recipeScale" data-id="${r.id}" data-servings="2">2 porcije</button>
           <button class="secondary recipeScale" data-id="${r.id}" data-servings="4">4 porcije</button>
           <span class="recipeServingCustom"><input class="recipeServingInput" data-id="${r.id}" type="number" min="1" step="1" inputmode="numeric" value="${servings}" aria-label="Broj porcija"><button class="secondary recipeScaleCustom" data-id="${r.id}">Skaliraj</button></span>
+          <button class="secondary recipeFindAlternatives" data-id="${r.id}">Provjeri bazu</button>
           <button class="secondary recipeDayPlan" data-id="${r.id}">+ Dnevni plan</button>
           <button class="danger deleteRecipe" data-id="${r.id}">Obriši</button>
         </div>
