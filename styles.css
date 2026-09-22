@@ -351,3 +351,35 @@ main {
   .mealIng>div:nth-child(3){display:none}
   .mealIng .macro{font-size:11px;line-height:1.35}
 }
+
+/* Phase 6: recipe details */
+.recipeItems{display:grid;gap:4px;margin-top:8px}
+.recipeIngredient{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid #edf1f5;font-size:12px;color:var(--muted)}
+.recipeIngredient:last-child{border-bottom:0}
+@media(max-width:760px){
+  .recipeActions{width:100%}
+  .recipeActions button{flex:1 1 auto}
+  .recipeIngredient{align-items:flex-start}
+  .recipeIngredient span:last-child{white-space:nowrap}
+}
+
+.recipePriceMeta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px;font-size:11px;color:var(--muted)}
+.recipeTrend{font-weight:800;border-radius:999px;padding:2px 7px;background:#eef2f6}
+.recipeTrend.up{color:#a63b27;background:#fff0ec}
+.recipeTrend.down{color:#087a55;background:#eaf8f2}
+.recipeTrend.flat{color:var(--muted)}
+
+.recipeWhy{margin-top:6px;font-size:12px;color:var(--muted)}
+.recipeWhy summary{cursor:pointer;font-weight:700;color:var(--ink)}
+.recipeWhy div{display:grid;gap:3px;margin-top:5px}
+.recipeWhy span{display:flex;justify-content:space-between;gap:12px}
+.recipeServingCustom{display:inline-flex;gap:4px;align-items:center}
+.recipeServingInput{width:58px;padding:7px 6px}
+@media(max-width:760px){.recipeServingCustom{width:100%}.recipeServingInput{flex:0 0 64px}.recipeServingCustom button{flex:1}}
+
+.recipeSource{display:inline-block;margin-left:5px;padding:1px 5px;border-radius:999px;background:#eef2f6;color:var(--muted);font-size:10px;font-weight:700}
+
+.recipeIngredientWrap{border-bottom:1px solid #edf1f5}
+.recipeIngredientWrap .recipeIngredient{border-bottom:0}
+.recipeAlternative{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 0 7px;font-size:11px;color:#087a55}
+.recipeAlternative button{padding:4px 8px;font-size:11px}

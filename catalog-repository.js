@@ -42,7 +42,12 @@ const CatalogRepository = (() => {
     return dbGetProductWithOffers(productKey);
   }
 
-  return { setRemote, configure, search, getProduct, isOnline };
+  async function status() {
+    if (!remote || !isOnline() || typeof remote.status !== 'function') return null;
+    return remote.status();
+  }
+
+  return { setRemote, configure, search, getProduct, status, isOnline };
 })();
 
 CatalogRepository.configure();

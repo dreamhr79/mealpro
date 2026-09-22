@@ -1,6 +1,12 @@
 import { readZipFiles } from "./zip.ts";
 import { parseChain, normalizeRows } from "./normalize.ts";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS"
+};
+
 type Archive = { url?: string; date?: string; createdAt?: string; created_at?: string; timestamp?: string };
 
 function archiveTime(a: Archive) {
@@ -76,8 +82,10 @@ async function failSync(id: number | undefined, message: string) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method !== "POST") return new Response("Method not allowed", {status:405});
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return new Response("Method not allowed", {status:405, headers:corsHeaders});
   let syncId: number | undefined;
+  const requestBody = await req.json().catch(() => ({}));
   try {
     const listRes = await fetch("https://api.cijene.dev/v0/list");
     if (!listRes.ok) throw new Error(`cijene.dev list failed: ${listRes.status}`);
@@ -93,7 +101,14 @@ Deno.serve(async (req) => {
     const buffer = await zipRes.arrayBuffer();
     if (!buffer.byteLength) throw new Error("Downloaded archive is empty");
 
-    const chains = ["konzum","lidl","spar","plodine","tommy","eurospin","kaufland","studenac","ktc","metro","ribola","ntl"];
+    const allowedChains = ["konzum","lidl","spar","plodine","tommy","eurospin","kaufland","studenac","ktc","metro","ribola","ntl"];
+    const requested = Array.isArray(requestBody?.chains) ? body.chains.map((x:unknown) => String(x).toLowerCase()) : [];
+    const chains = (requested.length ? requested : ["konzum","lidl","spar","plodine","tommy","kaufland"])
+      .filter((x:string, i:number, a:string[]) => allowedChains.includes(x) && a.indexOf(x) === i);
+    if (!chains.length) throw new Error("No supported chains selected");
+
+    // Only inflate files for selected chains. This keeps the worker footprint
+    // bounded and lets MealPro intentionally maintain a focused Croatian catalog.
     const files = await readZipFiles(buffer, name => chains.some(chain =>
       name === `${chain}/products.csv` || name === `${chain}/prices.csv`
     ));
@@ -104,6 +119,9 @@ Deno.serve(async (req) => {
       const prices = files[`${chain}/prices.csv`];
       if (!products || !prices) { missingChains.push(chain); continue; }
       rows.push(...parseChain(chain, products, prices));
+      // Release inflated CSV strings before moving to the next normalization step.
+      delete files[`${chain}/products.csv`];
+      delete files[`${chain}/prices.csv`];
     }
     if (!rows.length) throw new Error("Archive contains no valid catalog rows");
     if (missingChains.length) throw new Error("Incomplete archive; missing chains: " + missingChains.join(", "));
@@ -120,13 +138,13 @@ Deno.serve(async (req) => {
 
     return Response.json({
       ok:true, syncId, archiveDate:archive.date || null, archiveUrl:archive.url,
-      archiveBytes:buffer.byteLength, products:model.products.length, offers:model.offers.length,
+      archiveBytes:buffer.byteLength, chains, products:model.products.length, offers:model.offers.length,
       applied, stage:"published"
-    });
+    }, { headers:corsHeaders });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     try { await clearStage(); } catch (_) {}
     try { await failSync(syncId, message); } catch (_) {}
-    return Response.json({ok:false,error:message},{status:500});
+    return Response.json({ok:false,error:message},{status:500,headers:corsHeaders});
   }
 });

@@ -8,8 +8,16 @@ let favorites = [], custom = [], recipes = [], meal = { recipeId: null, name: ''
 let dayPlan = { goals: { kcal: 2200, protein: 160, carbs: 220, fat: 70 }, blocks: [], settings: { kcalLocked: true, balance: 'carbs' } };
 let toastTimer;
 
-const $ = s => document.querySelector(s);
-const $$ = s => [...document.querySelectorAll(s)];
+var $ = s => document.querySelector(s);
+var $$ = s => [...document.querySelectorAll(s)];
+window.addEventListener('error', e => {
+  console.error('MealPro runtime error:', e.error || e.message);
+  const state = document.querySelector('#syncState');
+  if (state) state.textContent = 'Greška aplikacije — osvježi stranicu';
+});
+window.addEventListener('unhandledrejection', e => {
+  console.error('MealPro async error:', e.reason);
+});
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function norm(s) { return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLowerCase().trim(); }
 function tokens(s) { return [...new Set(norm(s).replace(/[^a-z0-9čćžšđ]+/g, ' ').split(/\s+/).filter(x => x.length >= 2))]; }
@@ -358,7 +366,7 @@ async function loadAll() {
   }
   
   const mSync = await dbGet('meta', 'sync');
-  if (mSync) $('#syncState').textContent = `Baza: ${mSync.date} · ${mSync.count.toLocaleString('hr-HR')} artikala`;
+  if (mSync) $('#syncState').textContent = `Lokalni cache: ${mSync.date || 'spremljen'}`;
   
   const mDay = await dbGet('meta', 'dayPlan');
   if (mDay && mDay.val) {
@@ -373,6 +381,7 @@ async function loadAll() {
     }
   }
 
+  await refreshRecipePriceHistory();
   renderFavorites();
   renderCustom();
   renderRecipes();
@@ -388,15 +397,15 @@ async function loadAll() {
 function activateTab(tab) {
   const target = $('#tabs button[data-tab="' + tab + '"]');
   if (!target) return;
-  $('#tabs button').forEach(x => x.classList.toggle('active', x.dataset.tab === tab));
-  $('.view').forEach(v => v.classList.toggle('active', v.id === tab));
-  $('#mobileBottomNav [data-mobile-tab]').forEach(x => x.classList.toggle('active', x.dataset.mobileTab === tab));
+  $$('#tabs button').forEach(x => x.classList.toggle('active', x.dataset.tab === tab));
+  $$('.view').forEach(v => v.classList.toggle('active', v.id === tab));
+  $$('#mobileBottomNav [data-mobile-tab]').forEach(x => x.classList.toggle('active', x.dataset.mobileTab === tab));
   if (tab === 'shoplist') renderShoppingList();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-$('#tabs button').forEach(b => b.onclick = () => activateTab(b.dataset.tab));
-$('#mobileBottomNav [data-mobile-tab]').forEach(b => b.onclick = () => activateTab(b.dataset.mobileTab));
+$$('#tabs button').forEach(b => b.onclick = () => activateTab(b.dataset.tab));
+$$('#mobileBottomNav [data-mobile-tab]').forEach(b => b.onclick = () => activateTab(b.dataset.mobileTab));
 const mobileMoreBtn = $('#mobileMoreBtn');
 if (mobileMoreBtn) mobileMoreBtn.onclick = () => $('#hamburgerBtn')?.click();
 
@@ -561,6 +570,7 @@ function recipeDraft(nameOverride = null) {
 
 async function persistRecipe(recipe, { asCurrent = true } = {}) {
   await dbPut('recipes', recipe);
+  await trackRecipePrice(recipe);
   if (asCurrent) {
     meal.recipeId = recipe.id;
     meal.name = recipe.name;
@@ -800,6 +810,71 @@ document.addEventListener('click', async e => {
     }
   }
   if (b.classList.contains('loadRecipe')) loadRecipe(b.dataset.id);
+  if (b.classList.contains('recipeUseAlternative')) {
+    const recipe = recipes.find(x => x.id === b.dataset.recipeId);
+    let source = b.dataset.altSource === 'Favorit' ? favorites : custom;
+    let replacement = source.find(x => String(x.id) === String(b.dataset.altId));
+    if (!replacement && b.dataset.altSource === 'Baza') {
+      const cached = [...recipeCatalogAlternatives.values()].find(x => String(x.product.id) === String(b.dataset.altId));
+      if (cached?.product) {
+        const catalogProduct = cached.product;
+        const productKey = canonicalProductKey(catalogProduct);
+        const existing = favorites.find(f => String(f.id) === productKey || (normalizeBarcode(f.barcode) && normalizeBarcode(f.barcode) === normalizeBarcode(catalogProduct.barcode)));
+        replacement = existing || {
+          ...catalogProduct,
+          id: productKey || catalogProduct.id,
+          catalogId: catalogProduct.catalogId || catalogProduct.id,
+          addedAt: new Date().toISOString()
+        };
+        if (!existing) {
+          await dbPut('favorites', replacement);
+          favorites.push(replacement);
+          renderFavorites();
+          renderPicker();
+          $('#favCount').textContent = `(${favorites.length})`;
+        }
+      }
+    }
+    const item = recipe?.items?.find(it => {
+      const p = resolveMealItemProduct(it);
+      return String(p.id) === String(b.dataset.productId) || String(it.productId) === String(b.dataset.productId);
+    });
+    if (recipe && replacement && item) {
+      const before = structuredClone(recipe);
+      item.productId = replacement.id;
+      item.product = structuredClone(replacement);
+      try {
+        recipe.updatedAt = new Date().toISOString();
+        await dbPut('recipes', recipe);
+        await trackRecipePrice(recipe);
+        if (meal.recipeId === recipe.id) {
+          meal.items = recipeLiveState(recipe).items.map(it => ({ productId: it.productId, product: { ...it.product }, qty: it.qty }));
+          renderMeal();
+        }
+        renderRecipes();
+        showToast(`Zamijenjeno s jeftinijim proizvodom: ${replacement.name}`);
+      } catch (err) {
+        Object.assign(recipe, before);
+        console.error('Recipe alternative error:', err);
+        showToast('Zamjena proizvoda nije uspjela.');
+      }
+    }
+  }
+  if (b.classList.contains('recipeFindAlternatives')) {
+    b.disabled = true;
+    const oldText = b.textContent;
+    b.textContent = 'Tražim…';
+    const found = await refreshCatalogRecipeAlternatives(b.dataset.id);
+    b.disabled = false;
+    b.textContent = oldText;
+    showToast(found ? `Pronađeno jeftinijih alternativa: ${found}` : 'Nema sigurnih jeftinijih alternativa u bazi.');
+  }
+  if (b.classList.contains('recipeDayPlan')) await addRecipeToDayPlan(b.dataset.id, 1);
+  if (b.classList.contains('recipeScale')) loadScaledRecipe(b.dataset.id, b.dataset.servings);
+  if (b.classList.contains('recipeScaleCustom')) {
+    const input = b.closest('.recipeServingCustom')?.querySelector('.recipeServingInput');
+    loadScaledRecipe(b.dataset.id, input?.value || 1);
+  }
 });
 
 document.addEventListener('input', e => {
@@ -1111,7 +1186,7 @@ function productCard(p, type) {
       <div class="name" style="font-size:15px">${esc(p.name)} ${saleBadge} ${unavailableBadge}</div>
       <div class="meta" style="font-size:13px">
         ${esc(p.brand || '')} · <b>${num(p.pack, 0)} ${esc(p.unit)}</b> · 
-        Najniža cijena: <b style="color:var(--accent);font-size:15px">${eur(p.price)}</b> (${esc(p.store || '')})
+        ${p.catalogAvailable === false ? 'Zadnja poznata cijena' : 'Najniža cijena'}: <b style="color:var(--accent);font-size:15px">${eur(p.price)}</b> (${esc(p.store || '')})
         ${p.barcode ? ` · <span style="opacity:.8">EAN: ${esc(p.barcode)}</span>` : ''}
       </div>
       <div>${unitBadge}</div>
@@ -1323,28 +1398,255 @@ $('#productForm').onsubmit = async e => {
 };
 
 // === RECEPTI ===
+function favoriteCandidateForProduct(product) {
+  const barcode = normalizeBarcode(product?.barcode);
+  return favorites.find(f =>
+    (barcode && normalizeBarcode(f.barcode) === barcode) ||
+    (product?.catalogId && String(f.catalogId) === String(product.catalogId)) ||
+    (product?.id && String(f.id) === String(product.id))
+  ) || null;
+}
+
+function customCandidateForProduct(product) {
+  const barcode = normalizeBarcode(product?.barcode);
+  return custom.find(p =>
+    (barcode && normalizeBarcode(p.barcode) === barcode) ||
+    (product?.id && String(p.id) === String(product.id))
+  ) || null;
+}
+
+function preferredRecipeProduct(item) {
+  const snapshot = item?.product && typeof item.product === 'object' ? item.product : {};
+  const favorite = favoriteCandidateForProduct(snapshot);
+  if (favorite) return { product: repairProductPackage(favorite), source: 'Favorit' };
+  const own = customCandidateForProduct(snapshot);
+  if (own) return { product: repairProductPackage(own), source: 'Moj proizvod' };
+  return { product: resolveMealItemProduct(item), source: snapshot?.catalogId || snapshot?.barcode ? 'Baza' : 'Spremljeno' };
+}
+
+function recipeProductKind(p) {
+  const n = norm(`${p?.name || ''} ${p?.brand || ''}`);
+  const kinds = [
+    ['greek-yogurt', /(grcki|greek).*jogurt|jogurt.*(grcki|greek)/],
+    ['skyr', /\bskyr\b/],
+    ['yogurt', /jogurt/],
+    ['cottage', /(cottage|zrnati|svjezi sir)/],
+    ['chicken-breast', /(pilec|pilet).*?(prsa|file|filet)/],
+    ['turkey-breast', /(purec|puret).*?(prsa|file|filet)/],
+    ['tuna', /\btun(a|e|u)\b/],
+    ['salmon', /losos/],
+    ['whey', /\bwhey\b|protein sirutke/],
+    ['casein', /casein|kazein/],
+    ['eggs', /\bjaj/],
+    ['oats', /zoben|oat/],
+    ['rice', /\briz|rice/],
+    ['pasta', /tjesten|pasta/],
+    ['bread', /kruh|toast/]
+  ];
+  return kinds.find(([, rx]) => rx.test(n))?.[0] || '';
+}
+
+function comparableRecipeProduct(a, b) {
+  if (!a || !b) return false;
+  const aUnit = String(a.unit || ''), bUnit = String(b.unit || '');
+  if (aUnit !== bUnit) return false;
+  const ak = recipeProductKind(a), bk = recipeProductKind(b);
+  if (ak || bk) return !!ak && ak === bk;
+  const aCategory = getFavoriteCategory(a), bCategory = getFavoriteCategory(b);
+  if (aCategory !== 'Ostalo' && aCategory === bCategory) {
+    const aWords = new Set(tokens(a.name || '').filter(w => w.length >= 4));
+    const bWords = tokens(b.name || '').filter(w => w.length >= 4);
+    return bWords.some(w => aWords.has(w));
+  }
+  const aWords = new Set(tokens(`${a.name || ''} ${a.brand || ''}`).filter(w => w.length >= 4));
+  return tokens(`${b.name || ''} ${b.brand || ''}`).some(w => w.length >= 4 && aWords.has(w));
+}
+
+function cheaperRecipeAlternative(product) {
+  const currentValue = getUnitValuePer100(product);
+  if (!(Number.isFinite(currentValue) && currentValue > 0)) return null;
+  const candidates = [...favorites.map(p => ({ product: p, source: 'Favorit' })), ...custom.map(p => ({ product: p, source: 'Moj proizvod' }))]
+    .filter(x => {
+      const sameId = String(x.product.id) === String(product.id);
+      const aCode = normalizeBarcode(product.barcode), bCode = normalizeBarcode(x.product.barcode);
+      const sameEan = aCode && bCode && aCode === bCode;
+      return !sameId && !sameEan && x.product.catalogAvailable !== false && comparableRecipeProduct(product, x.product);
+    })
+    .map(x => ({ ...x, value: getUnitValuePer100(x.product) }))
+    .filter(x => Number.isFinite(x.value) && x.value > 0 && x.value < currentValue * 0.995)
+    .sort((a,b) => a.value - b.value);
+  return candidates[0] || null;
+}
+
+const recipeCatalogAlternatives = new Map();
+
+function recipeAlternativeQuery(product) {
+  const kind = recipeProductKind(product);
+  const queries = {
+    'greek-yogurt': 'grčki jogurt', skyr: 'skyr', yogurt: 'jogurt', cottage: 'cottage sir',
+    'chicken-breast': 'pileća prsa', 'turkey-breast': 'pureća prsa', tuna: 'tuna',
+    salmon: 'losos', whey: 'whey', casein: 'kazein', eggs: 'jaja', oats: 'zobene',
+    rice: 'riža', pasta: 'tjestenina', bread: 'kruh'
+  };
+  return queries[kind] || tokens(product?.name || '').filter(w => w.length >= 4).slice(0, 2).join(' ');
+}
+
+async function findCatalogRecipeAlternative(product) {
+  if (!CatalogRepository.isOnline()) return null;
+  const q = recipeAlternativeQuery(product);
+  if (!q || q.length < 2) return null;
+  try {
+    const rows = await CatalogRepository.search(q, 80);
+    const currentValue = getUnitValuePer100(product);
+    const candidates = (rows || []).map(({ product: p, offers }) => {
+      const sorted = sortOffersByPrice(offers || []);
+      const best = sorted[0];
+      if (!best) return null;
+      const candidate = repairProductPackage({ ...p, ...best, id: best.id, catalogId: best.id, offers: favoriteOfferSnapshot(sorted), catalogAvailable: true });
+      const aCode = normalizeBarcode(product.barcode), bCode = normalizeBarcode(candidate.barcode);
+      if ((aCode && bCode && aCode === bCode) || !comparableRecipeProduct(product, candidate)) return null;
+      return { product: candidate, source: 'Baza', value: getUnitValuePer100(candidate) };
+    }).filter(Boolean).filter(x => Number.isFinite(x.value) && x.value > 0 && x.value < currentValue * 0.995).sort((a,b) => a.value - b.value);
+    return candidates[0] || null;
+  } catch (err) {
+    console.warn('Catalog recipe alternative lookup failed.', err);
+    return null;
+  }
+}
+
+async function refreshCatalogRecipeAlternatives(recipeId) {
+  const recipe = recipes.find(r => r.id === recipeId);
+  if (!recipe) return 0;
+  const live = recipeLiveState(recipe);
+  let changed = false, found = 0;
+  for (const item of live.items) {
+    if (item.cheaperAlternative) continue;
+    const key = `${recipe.id}:${item.productId}`;
+    const alt = await findCatalogRecipeAlternative(item.product);
+    if (alt) { recipeCatalogAlternatives.set(key, alt); changed = true; found++; }
+  }
+  if (changed) renderRecipes();
+  return found;
+}
+
+function recipeLiveState(recipe) {
+  const items = (Array.isArray(recipe?.items) ? recipe.items : [])
+    .filter(it => Number(it?.qty) > 0)
+    .map(it => {
+      const preferred = preferredRecipeProduct(it);
+      const product = preferred.product;
+      const productId = product.id || it.productId || null;
+      return { ...it, productId, product, priceSource: preferred.source, cheaperAlternative: cheaperRecipeAlternative(product) || recipeCatalogAlternatives.get(`${recipe.id}:${productId}`) || null };
+    });
+  const servings = Math.max(1, Number(recipe?.servings) || 1);
+  let totals = { kcal: 0, protein: 0, carbs: 0, fat: 0, cost: 0 };
+  for (const it of items) {
+    const p = it.product, q = Number(it.qty) || 0;
+    const factor = p.unit === 'kom' ? q : q / 100;
+    totals.kcal += Number(p.kcal || 0) * factor;
+    totals.protein += Number(p.protein || 0) * factor;
+    totals.carbs += Number(p.carbs || 0) * factor;
+    totals.fat += Number(p.fat || 0) * factor;
+    totals.cost += itemCost(p, q);
+  }
+  return { items, servings, totals };
+}
+
+let recipePriceHistory = new Map();
+
+function recipePriceSnapshot(recipe, live = recipeLiveState(recipe)) {
+  return {
+    recipeId: recipe.id,
+    price: Number(live.totals.cost.toFixed(4)),
+    ingredientPrices: live.items.map(it => ({
+      productId: it.productId || it.product?.id || null,
+      name: it.product?.name || '',
+      qty: Number(it.qty) || 0,
+      cost: Number(itemCost(it.product, it.qty).toFixed(4))
+    })),
+    recordedAt: new Date().toISOString()
+  };
+}
+
+async function trackRecipePrice(recipe, live = recipeLiveState(recipe)) {
+  if (!recipe?.id || !live.items.length) return false;
+  const current = recipePriceSnapshot(recipe, live);
+  const history = recipePriceHistory.get(recipe.id) || [];
+  const previous = history[history.length - 1];
+  if (previous && Math.abs(Number(previous.price) - current.price) < 0.0001) return false;
+  await dbPut('recipePriceHistory', current);
+  history.push(current);
+  while (history.length > 30) {
+    const removed = history.shift();
+    if (removed?.id != null) await dbDelete('recipePriceHistory', removed.id);
+  }
+  recipePriceHistory.set(recipe.id, history);
+  return true;
+}
+
+function recipePriceTrend(recipeId, currentPrice) {
+  const history = recipePriceHistory.get(recipeId) || [];
+  if (!history.length) return '';
+  const previous = history.length > 1 ? history[history.length - 2] : history[0];
+  const baseline = Number(previous?.price) || 0;
+  const current = Number(currentPrice) || 0;
+  if (!(baseline > 0) || Math.abs(current - baseline) < 0.005) return '<span class="recipeTrend flat">bez promjene</span>';
+  const delta = current - baseline;
+  const pct = delta / baseline * 100;
+  const direction = delta > 0 ? '↑' : '↓';
+  const cls = delta > 0 ? 'up' : 'down';
+  return `<span class="recipeTrend ${cls}">${direction} ${eur(Math.abs(delta))} (${num(Math.abs(pct))}%)</span>`;
+}
+
+function recipePriceExplanation(recipeId) {
+  const history = recipePriceHistory.get(recipeId) || [];
+  if (history.length < 2) return '';
+  const previous = history[history.length - 2], current = history[history.length - 1];
+  const before = new Map((previous.ingredientPrices || []).map(x => [String(x.productId || x.name), x]));
+  const changes = (current.ingredientPrices || []).map(x => {
+    const old = before.get(String(x.productId || x.name));
+    return { name: x.name, delta: Number(x.cost) - Number(old?.cost || 0) };
+  }).filter(x => Math.abs(x.delta) >= 0.005).sort((a,b) => Math.abs(b.delta) - Math.abs(a.delta));
+  if (!changes.length) return '';
+  return `<details class="recipeWhy"><summary>Zašto se cijena promijenila?</summary><div>${changes.map(x => `<span>${esc(x.name)} <b>${x.delta > 0 ? '+' : '−'}${eur(Math.abs(x.delta))}</b></span>`).join('')}</div></details>`;
+}
+
+function recipePriceRange(recipeId, currentPrice) {
+  const history = recipePriceHistory.get(recipeId) || [];
+  const prices = [...history.map(x => Number(x.price) || 0), Number(currentPrice) || 0].filter(x => x > 0);
+  if (!prices.length) return '';
+  return `min ${eur(Math.min(...prices))} · max ${eur(Math.max(...prices))}`;
+}
+
+async function refreshRecipePriceHistory() {
+  const rows = await dbAll('recipePriceHistory');
+  recipePriceHistory = new Map();
+  for (const row of rows) {
+    if (!recipePriceHistory.has(row.recipeId)) recipePriceHistory.set(row.recipeId, []);
+    recipePriceHistory.get(row.recipeId).push(row);
+  }
+  for (const history of recipePriceHistory.values()) history.sort((a, b) => String(a.recordedAt).localeCompare(String(b.recordedAt)));
+  for (const recipe of recipes) await trackRecipePrice(recipe);
+}
+
 function renderRecipes() {
-  const sortedRecipes = [...recipes].sort((a, b) => {
-    const da = String(a.savedAt || a.updatedAt || '');
-    const db = String(b.savedAt || b.updatedAt || '');
+  const query = norm($('#recipeSearch')?.value || '');
+  const sortMode = $('#recipeSort')?.value || 'newest';
+  const recipeRows = recipes.map(recipe => ({ recipe, live: recipeLiveState(recipe) }))
+    .filter(({ recipe, live }) => !query || norm(`${recipe.name || ''} ${live.items.map(it => it.product?.name || '').join(' ')}`).includes(query));
+
+  const sortedRecipes = recipeRows.sort((a, b) => {
+    if (sortMode === 'name') return String(a.recipe.name || '').localeCompare(String(b.recipe.name || ''), 'hr');
+    if (sortMode === 'cost') return (a.live.totals.cost / a.live.servings) - (b.live.totals.cost / b.live.servings);
+    if (sortMode === 'protein') return (b.live.totals.protein / b.live.servings) - (a.live.totals.protein / a.live.servings);
+    const da = String(a.recipe.savedAt || a.recipe.updatedAt || '');
+    const db = String(b.recipe.savedAt || b.recipe.updatedAt || '');
     return db.localeCompare(da);
-  });
+  }).map(x => x.recipe);
   $('#recipesList').innerHTML = sortedRecipes.length ? sortedRecipes.map(r => {
-    const items = Array.isArray(r.items) ? r.items.map(it => ({ ...it, product: resolveMealItemProduct(it) })) : [];
-    const servings = Math.max(1, Number(r.servings) || 1);
-    const cost = items.reduce((s, it) => s + itemCost(it.product, Number(it.qty) || 0), 0);
-    
-    // Izračunaj makrose iz sastojaka
-    let t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
-    for (const it of items) {
-      const p = it.product, q = it.qty, f = (p.unit === 'kom' ? q : q / 100);
-      t.kcal += Number(p.kcal || 0) * f;
-      t.protein += Number(p.protein || 0) * f;
-      t.carbs += Number(p.carbs || 0) * f;
-      t.fat += Number(p.fat || 0) * f;
-    }
-    const sv = servings;
-    const calcMacroHtml = `${num(t.kcal / sv, 0)} kcal · P ${num(t.protein / sv)}g · UH ${num(t.carbs / sv)}g · M ${num(t.fat / sv)}g / porcija`;
+    const { items, servings, totals } = recipeLiveState(r);
+    const cost = totals.cost;
+    const calcMacroHtml = `${num(totals.kcal / servings, 0)} kcal · P ${num(totals.protein / servings)}g · UH ${num(totals.carbs / servings)}g · M ${num(totals.fat / servings)}g / porcija`;
 
     // Autorski makrosi ako postoje
     let authorMacroHtml = '';
@@ -1373,20 +1675,101 @@ function renderRecipes() {
         <div>
           <div class="name" style="font-size:16px">${esc(r.name)}</div>
           <div class="meta">${servings} porcija · ${items.length} sastojaka · <b>${eur(cost)}</b> (${eur(cost / servings)} / porciji)</div>
+          <div class="recipePriceMeta">${recipePriceTrend(r.id, cost)} <span>${recipePriceRange(r.id, cost)}</span></div>
+          ${recipePriceExplanation(r.id)}
           <div class="macro" style="margin-top:2px">${calcMacroHtml}</div>
           ${authorMacroHtml}
         </div>
-        <div style="display:flex;gap:6px;align-self:start">
+        <div class="recipeActions" style="display:flex;gap:6px;align-self:start;flex-wrap:wrap">
           <button class="secondary loadRecipe" data-id="${r.id}">Otvori u Kreatoru</button>
+          <button class="secondary recipeScale" data-id="${r.id}" data-servings="1">1 porcija</button>
+          <button class="secondary recipeScale" data-id="${r.id}" data-servings="2">2 porcije</button>
+          <button class="secondary recipeScale" data-id="${r.id}" data-servings="4">4 porcije</button>
+          <span class="recipeServingCustom"><input class="recipeServingInput" data-id="${r.id}" type="number" min="1" step="1" inputmode="numeric" value="${servings}" aria-label="Broj porcija"><button class="secondary recipeScaleCustom" data-id="${r.id}">Skaliraj</button></span>
+          <button class="secondary recipeFindAlternatives" data-id="${r.id}">Provjeri bazu</button>
+          <button class="secondary recipeDayPlan" data-id="${r.id}">+ Dnevni plan</button>
           <button class="danger deleteRecipe" data-id="${r.id}">Obriši</button>
         </div>
       </div>
-      <div class="recipeItems" style="font-size:12px;color:var(--muted)">
-        ${items.map(x => `${num(x.qty, 0)} ${esc(x.product.unit || 'g')} ${esc(x.product.name)}`).join(' · ')}
+      <div class="recipeItems">
+        ${items.map(x => {
+          const unavailable = x.product.catalogAvailable === false ? '<span class="saleBadgeMini">nije u aktualnom katalogu</span>' : '';
+          const alt = x.cheaperAlternative;
+          const saving = alt ? itemCost(x.product, x.qty) - itemCost(alt.product, x.qty) : 0;
+          const recipeSavingPct = cost > 0 ? saving / cost * 100 : 0;
+          const newRecipeCost = Math.max(0, cost - saving);
+          const alternative = alt && saving > 0.004 ? `<div class="recipeAlternative"><span>Jeftinija alternativa: <b>${esc(alt.product.name)}</b> · ${alt.source}<br><small>Sastojak −${eur(saving)} · obrok ${eur(newRecipeCost)} (−${num(recipeSavingPct)}%)</small></span><button class="secondary recipeUseAlternative" data-recipe-id="${r.id}" data-product-id="${x.productId}" data-alt-source="${alt.source}" data-alt-id="${alt.product.id}">Zamijeni</button></div>` : '';
+          return `<div class="recipeIngredientWrap"><div class="recipeIngredient"><span><b>${esc(x.product.name)}</b> <small class="recipeSource">${esc(x.priceSource || '')}</small> ${unavailable}</span><span>${num(x.qty, 0)} ${esc(x.product.unit || 'g')} · ${eur(itemCost(x.product, x.qty))}</span></div>${alternative}</div>`;
+        }).join('')}
       </div>
       ${instructionsHtml}
     </div>`;
   }).join('') : '<div class="empty">Nema spremljenih recepata. Sastavi obrok u Kreatoru ili uvezi recept s Instagrama.</div>';
+}
+
+$('#recipeSearch')?.addEventListener('input', renderRecipes);
+$('#recipeSort')?.addEventListener('change', renderRecipes);
+
+function servingLabel(n, accusative = false) {
+  const value = Math.max(1, Math.round(Number(n) || 1));
+  if (value === 1) return accusative ? 'porciju' : 'porcija';
+  if (value >= 2 && value <= 4) return 'porcije';
+  return 'porcija';
+}
+
+function recipeItemsForServings(recipe, targetServings = 1) {
+  const live = recipeLiveState(recipe);
+  const target = Math.max(1, Number(targetServings) || 1);
+  const factor = target / live.servings;
+  return live.items.map(it => ({
+    productId: it.product.id || it.productId || null,
+    product: { ...it.product },
+    qty: Number(it.qty) * factor
+  }));
+}
+
+function loadScaledRecipe(rid, targetServings) {
+  const r = recipes.find(x => x.id === rid);
+  if (!r) return;
+  const live = recipeLiveState(r);
+  const target = Math.max(1, Math.round(Number(targetServings) || 1));
+  const factor = target / live.servings;
+  meal = {
+    recipeId: null,
+    name: `${r.name} – ${target} ${servingLabel(target)}`,
+    servings: target,
+    items: recipeItemsForServings(r, target),
+    instructions: r.instructions || '',
+    authorMacros: r.authorMacros || null
+  };
+  $('#mealName').value = meal.name;
+  $('#mealServings').value = target;
+  updateEditingBanner();
+  activateTab('creator');
+  renderMeal();
+  showToast(`Recept skaliran na ${target} ${servingLabel(target, true)}.`);
+}
+
+async function addRecipeToDayPlan(recipeId, targetServings = 1) {
+  const recipe = recipes.find(x => x.id === recipeId);
+  if (!recipe) return;
+  if (!dayPlan.blocks?.length) {
+    activateTab('dayplan');
+    showToast('Prvo dodaj blok obroka u Dnevnom planu.');
+    return;
+  }
+  const block = dayPlan.blocks[0];
+  const before = structuredClone(block.items || []);
+  block.items = [...(block.items || []), ...recipeItemsForServings(recipe, targetServings)];
+  try {
+    await saveDayPlan();
+    renderDayPlan();
+    showToast(`Dodano u "${block.name || 'Dnevni plan'}": ${recipe.name}`);
+  } catch (err) {
+    block.items = before;
+    console.error('Recipe to day plan error:', err);
+    showToast('Dodavanje recepta u Dnevni plan nije uspjelo.');
+  }
 }
 
 function loadRecipe(rid) {
@@ -1846,175 +2229,80 @@ $('#copyShopList').onclick = () => {
   });
 };
 
-// === SINKRONIZACIJA CIJENE.DEV ===
-$('#syncBtn').onclick = () => $('#syncDialog').showModal();
-$('#quickSyncBtn').onclick = () => $('#syncDialog').showModal();
-$('#syncCancel').onclick = () => $('#syncDialog').close();
-
-$('#chainChecks').innerHTML = Object.entries(CHAINS).map(([k, v]) => `
-  <label><input type="checkbox" value="${k}" ${['konzum', 'lidl', 'spar', 'plodine', 'tommy', 'eurospin', 'kaufland'].includes(k) ? 'checked' : ''}>${v}</label>
-`).join('');
-
-async function fetchWithCorsFallback(url, options = {}) {
-  // 1. Probaj direktno (za Chrome ekstenziju ili ako server dopusti CORS)
+// === CENTRALNI KATALOG (SUPABASE) ===
+async function refreshCentralCatalogStatus({ toast = false } = {}) {
+  const state = $('#syncState');
+  const progress = $('#syncProgress');
   try {
-    const r = await fetch(url, options);
-    if (r.ok) return r;
-  } catch (e) {
-    console.warn('Direktni fetch nije uspio, isprobavam proxy 1...', e);
+    if (progress) progress.textContent = 'Provjeravam centralnu bazu…';
+    const status = await CatalogRepository.status();
+    if (!status) {
+      if (state) state.textContent = 'Centralna baza: nema uspješne sinkronizacije';
+      if (progress) progress.textContent = 'Nema evidentirane uspješne sinkronizacije. Server mora pokrenuti catalog-sync.';
+      if (toast) showToast('Centralna baza još nema uspješnu sinkronizaciju.');
+      return null;
+    }
+    const date = status.archive_date || (status.finished_at ? String(status.finished_at).slice(0, 10) : '');
+    const products = Number(status.products_count) || 0;
+    const offers = Number(status.offers_count) || 0;
+    if (state) state.textContent = `Baza: ${date || 'ažurirana'} · ${products.toLocaleString('hr-HR')} proizvoda`;
+    if (progress) progress.textContent = `Supabase katalog: ${products.toLocaleString('hr-HR')} proizvoda · ${offers.toLocaleString('hr-HR')} ponuda · zadnje ažuriranje ${date || 'nepoznato'}.`;
+    if (toast) showToast('Stanje centralne baze je osvježeno.');
+    return status;
+  } catch (err) {
+    console.error('Central catalog status error:', err);
+    if (state) state.textContent = 'Centralna baza nije dostupna';
+    if (progress) progress.textContent = 'Ne mogu dohvatiti stanje Supabase kataloga: ' + err.message;
+    if (toast) showToast('Provjera centralne baze nije uspjela.');
+    return null;
   }
-
-  // 2. Proxy 1: corsproxy.io
-  try {
-    const p1 = 'https://corsproxy.io/?' + encodeURIComponent(url);
-    const r1 = await fetch(p1, options);
-    if (r1.ok) return r1;
-  } catch (e) {
-    console.warn('Proxy 1 nije uspio, isprobavam proxy 2...', e);
-  }
-
-  // 3. Proxy 2: allorigins.win
-  try {
-    const p2 = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
-    const r2 = await fetch(p2, options);
-    if (r2.ok) return r2;
-  } catch (e) {
-    console.warn('Proxy 2 nije uspio...', e);
-  }
-
-  throw Error('Neuspješno dohvaćanje podataka (CORS blokada ili prekid veze).');
 }
 
-$('#syncStart').onclick = async () => {
-  const chains = $$('#chainChecks input:checked').map(x => x.value);
-  if (!chains.length) return alert('Odaberi barem jedan lanac.');
-  const log = m => { $('#syncProgress').textContent = m; };
-
+const SYNC_CHAINS = { konzum:'Konzum', lidl:'Lidl', spar:'SPAR', plodine:'Plodine', tommy:'Tommy', kaufland:'Kaufland', eurospin:'Eurospin', studenac:'Studenac', ktc:'KTC', metro:'Metro', ribola:'Ribola', ntl:'NTL' };
+function renderSyncChains() {
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem('mealpro-sync-chains') || '[]'); } catch (_) {}
+  if (!saved.length) saved = ['konzum','lidl','spar','plodine','tommy','kaufland'];
+  $('#chainChecks').innerHTML = Object.entries(SYNC_CHAINS).map(([key,name]) =>
+    `<label><input type="checkbox" value="${key}" ${saved.includes(key)?'checked':''}> ${name}</label>`
+  ).join('');
+}
+function selectedSyncChains() { return $('#chainChecks input:checked').map(x => x.value); }
+async function runCentralCatalogSync() {
+  const chains = selectedSyncChains();
+  if (!chains.length) return showToast('Odaberi barem jedan trgovački lanac.');
+  localStorage.setItem('mealpro-sync-chains', JSON.stringify(chains));
+  const progress = $('#syncProgress');
+  const cfg = globalThis.MEALPRO_CONFIG || {};
+  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) return showToast('Supabase nije konfiguriran.');
+  progress.textContent = 'Server obrađuje: ' + chains.map(x => SYNC_CHAINS[x]).join(', ') + '…';
+  $('#syncStart').disabled = true;
   try {
-    log('Dohvaćam popis arhiva s api.cijene.dev…');
-    const lr = await fetchWithCorsFallback('https://api.cijene.dev/v0/list');
-    if (!lr.ok) throw Error('HTTP ' + lr.status);
-    const list = await lr.json(), latest = newestArchive(list.archives);
-    if (!latest?.url) throw Error('Nema dostupnih arhiva.');
-
-    const usingManualZip = !!manualZipBuffer;
-    let buf = manualZipBuffer;
-    if (!buf) {
-      log(`Preuzimam arhivu ${latest.date}…`);
-      const zr = await fetchWithCorsFallback(latest.url);
-      if (!zr.ok) throw Error('Greška pri preuzimanju arhive: HTTP ' + zr.status);
-      buf = await zr.arrayBuffer();
-    } else {
-      log('Koristim ručno učitani ZIP...');
-    }
-
-    log(`ZIP ${(buf.byteLength / 1024 / 1024).toFixed(1)} MB. Otvaram odabrane lance…`);
-    const wanted = n => chains.some(c => n === `${c}/products.csv` || n === `${c}/prices.csv`);
-    const files = await readZipFiles(buf, wanted);
-
-    const all = [];
-    const missingChains = [];
-    for (const chain of chains) {
-      const pt = files[`${chain}/products.csv`], pr = files[`${chain}/prices.csv`];
-      if (!pt || !pr) {
-        missingChains.push(CHAINS[chain] || chain);
-        continue;
-      }
-      log(`Obrađujem ${CHAINS[chain]}…`);
-      const prices = parseCsv(pr), best = new Map();
-      for (let i = 1; i < prices.length; i++) {
-        const c = prices[i], pid = (c[1] || '').trim();
-        const regular = nval(c[2]), special = nval(c[6]);
-        // A sale price is valid only when it is a positive amount. Zero/blank
-        // must not replace the regular price or mark an item as discounted.
-        const hasSpecial = Number.isFinite(special) && special > 0;
-        const price = hasSpecial ? special : regular;
-        if (!pid || !(price > 0)) continue;
-        const prev = best.get(pid);
-        if (!prev || price < prev.price) best.set(pid, { price, ppu: nval(c[3]), sale: hasSpecial });
-      }
-      const products = parseCsv(pt);
-      for (let i = 1; i < products.length; i++) {
-        const c = products[i], pid = (c[0] || '').trim(), name = (c[2] || '').trim(), bp = best.get(pid);
-        if (!pid || !name || !bp) continue;
-        const pu = calcSmartPack(c[6], c[5], name, bp.price, bp.ppu), barcode = normalizeBarcode(c[1]), search = norm(`${name} ${c[3] || ''} ${barcode}`);
-        all.push({
-          id: `${chain}:${pid}`, externalId: pid, barcode, name,
-          brand: (c[3] || '').trim(), pack: pu.pack, unit: pu.unit, price: bp.price,
-          pricePer100: (pu.unit === 'g' || pu.unit === 'ml') ? (bp.price / pu.pack * 100) : null,
-          onSale: bp.sale, store: CHAINS[chain], search, tokens: tokens(search)
-        });
-      }
-    }
-
-    if (!all.length) throw Error('U odabranim lancima nisu pronađeni valjani artikli. Postojeća baza nije promijenjena.');
-    if (missingChains.length) {
-      throw Error(`Sinkronizacija je prekinuta jer ZIP nema potpune CSV podatke za: ${missingChains.join(', ')}. Postojeća baza nije promijenjena.`);
-    }
-    // Build the normalized model directly. We no longer persist the raw
-    // per-store catalog, avoiding a duplicate copy of the same cijene.dev data.
-    const normalized = buildNormalizedCatalogModel(all);
-    if (!normalized.products.length || !normalized.offers.length) {
-      throw Error('Normalizacija nije proizvela valjane proizvode i ponude. Postojeća baza nije promijenjena.');
-    }
-    const invalidOffers = normalized.offers.filter(o => !o.productKey || !(Number(o.price) > 0));
-    if (invalidOffers.length) {
-      throw Error(`Normalizacija je pronašla ${invalidOffers.length} nevaljanih ponuda. Postojeća baza nije promijenjena.`);
-    }
-    log(`Spremam ${normalized.products.length.toLocaleString('hr-HR')} proizvoda i ${normalized.offers.length.toLocaleString('hr-HR')} aktualnih ponuda…`);
-    const syncStamp = new Date().toISOString();
-    const modelStats = await dbSyncCatalogModel(normalized.products, normalized.offers, syncStamp);
-    const prunedHistory = await dbPrunePriceHistory(30);
-    log(`Model: ${modelStats.products.toLocaleString('hr-HR')} proizvoda · ${modelStats.offers.toLocaleString('hr-HR')} aktualnih ponuda · ${modelStats.priceChanges.toLocaleString('hr-HR')} promjena cijene · ${modelStats.removedOffers.toLocaleString('hr-HR')} nestalih ponuda`);
-    if (prunedHistory) log(`Povijest cijena: uklonjeno ${prunedHistory.toLocaleString('hr-HR')} zastarjelih zapisa (zadržano najviše 30 promjena po ponudi).`);
-
-    // Refresh favorites from the normalized in-memory model without rebuilding
-    // a second raw catalog copy.
-    const productByKey = new Map(normalized.products.map(p => [p.id, p]));
-    const offersByKey = new Map();
-    for (const offer of normalized.offers) {
-      if (!offersByKey.has(offer.productKey)) offersByKey.set(offer.productKey, []);
-      offersByKey.get(offer.productKey).push(offer);
-    }
-    const offerById = new Map(normalized.offers.map(o => [o.id, o]));
-    for (const f of favorites) {
-      const directKey = f.id?.startsWith('ean:') || f.id?.startsWith('source:') ? f.id : '';
-      const barcodeKey = normalizeBarcode(f.barcode) ? `ean:${normalizeBarcode(f.barcode)}` : '';
-      const legacyOfferKey = f.catalogId ? offerById.get(f.catalogId)?.productKey || '' : '';
-      const productKey = directKey || barcodeKey || legacyOfferKey;
-      if (!productKey) continue;
-      const product = productByKey.get(productKey);
-      let offers = offersByKey.get(productKey) || [];
-      if (!product || !offers.length) {
-        if (f.catalogId || directKey || barcodeKey) {
-          const unavailable = { ...f, catalogAvailable: false, offers: [], onSale: false };
-          await dbPut('favorites', unavailable);
-          await propagateProductUpdate(unavailable);
-        }
-        continue;
-      }
-      const refreshed = applyCatalogStateToFavorite(f, product, offers);
-      Object.assign(f, refreshed);
-      await dbPut('favorites', f);
-      await propagateProductUpdate(f);
-    }
-
-    await dbPut('meta', { key: 'sync', date: latest.date || null, archiveUrl: latest.url || null, count: all.length, products: modelStats.products, offers: modelStats.offers, priceChanges: modelStats.priceChanges, removedOffers: modelStats.removedOffers, missingChains, source: usingManualZip ? 'manual-zip' : 'cijene.dev', schemaVersion: 2, syncedAt: syncStamp });
-    await loadAll();
-    log(`Gotovo! Baza sadrži ${all.length.toLocaleString('hr-HR')} ažuriranih artikala.`);
-    if (usingManualZip) {
-      manualZipBuffer = null;
-      const manualInput = $('#manualZip');
-      if (manualInput) manualInput.value = '';
-      log('Ručni ZIP je potrošen i uklonjen iz memorije.');
-    }
-    showToast('Baza cijena je uspješno ažurirana!');
-    setTimeout(() => $('#syncDialog').close(), 1200);
+    const res = await fetch(cfg.supabaseUrl.replace(/\/$/,'') + '/functions/v1/catalog-sync', {
+      method:'POST',
+      headers:{ apikey:cfg.supabaseAnonKey, Authorization:'Bearer '+cfg.supabaseAnonKey, 'Content-Type':'application/json' },
+      body:JSON.stringify({ chains })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP '+res.status));
+    progress.textContent = `Gotovo: ${Number(data.products||0).toLocaleString('hr-HR')} proizvoda · ${Number(data.offers||0).toLocaleString('hr-HR')} ponuda.`;
+    await refreshCentralCatalogStatus();
+    await refreshFavoritesFromCatalog({ silent:false });
+    showToast('Centralna baza je uspješno ažurirana.');
   } catch (err) {
-    console.error(err);
-    log('Greška: ' + err.message);
-  }
-};
+    console.error('Central catalog sync error:', err);
+    progress.textContent = 'Sinkronizacija nije uspjela: ' + err.message;
+    showToast('Ažuriranje centralne baze nije uspjelo.');
+  } finally { $('#syncStart').disabled = false; }
+}
+function openSyncDialog() { renderSyncChains(); $('#syncDialog').showModal(); refreshCentralCatalogStatus(); }
+$('#syncBtn').onclick = openSyncDialog;
+$('#quickSyncBtn').onclick = openSyncDialog;
+$('#syncCancel').onclick = () => $('#syncDialog').close();
+$('#syncCheck').onclick = () => refreshCentralCatalogStatus({ toast:true });
+$('#syncSelectAll').onclick = () => $('#chainChecks input').forEach(x => x.checked=true);
+$('#syncSelectNone').onclick = () => $('#chainChecks input').forEach(x => x.checked=false);
+$('#syncStart').onclick = runCentralCatalogSync;
 
 // === INSTAGRAM IMPORTER ===
 let igParsedItems = [];
@@ -2538,7 +2826,10 @@ $('#backupFileInput').onchange = async e => {
 loadAll().then(() => {
   // Keep persisted favorites useful offline, then opportunistically refresh
   // their commercial data when the central catalog is configured/reachable.
-  setTimeout(() => refreshFavoritesFromCatalog({ silent: true }), 250);
+  setTimeout(async () => {
+    await refreshCentralCatalogStatus();
+    await refreshFavoritesFromCatalog({ silent: true });
+  }, 250);
 }).catch(e => {
   console.error('Start error:', e);
   const syncState = $('#syncState');
