@@ -66,7 +66,7 @@ async function dbSearchCatalog(q,limit=80){
    }
    rows.push(c.value);c.continue();
   };
-  req.onerror=()=>rej(r.error);
+  req.onerror=()=>rej(req.error || Error('Greška pri pretraživanju kataloga.'));
  });
 }
 
