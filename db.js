@@ -44,6 +44,24 @@ async function dbBulkPut(store,rows,onProgress){
   await new Promise(r=>setTimeout(r,0));
  }
 }
+async function dbReplaceStore(store,rows,onProgress){
+ const d=await openDB();
+ return new Promise((res,rej)=>{
+  const tx=d.transaction(store,'readwrite'),os=tx.objectStore(store);
+  os.clear();
+  let done=0;
+  for(const row of rows||[]){
+   const req=os.put(row);
+   req.onsuccess=()=>{
+    done++;
+    if(done%1500===0||done===rows.length)onProgress?.(done,rows.length);
+   };
+  }
+  tx.oncomplete=()=>res();
+  tx.onerror=()=>rej(tx.error||Error('Transakcija zamjene baze nije uspjela.'));
+  tx.onabort=()=>rej(tx.error||Error('Transakcija zamjene baze je prekinuta.'));
+ });
+}
 async function dbSearchCatalog(q,limit=80){
  const words=norm(q).split(/\s+/).filter(Boolean);
  if(!words.length)return [];
