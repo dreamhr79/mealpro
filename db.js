@@ -183,7 +183,10 @@ async function dbSyncCatalogModel(products,offers,syncedAt){
  return new Promise((res,rej)=>{
   const tx=d.transaction(['products','offers','priceHistory'],'readwrite');
   const ps=tx.objectStore('products'),os=tx.objectStore('offers'),hs=tx.objectStore('priceHistory');
-  // Products are canonical and upserted: the same product is not duplicated on refresh.
+  // Products represent the current canonical catalog. Replace their current
+  // state atomically so products that disappeared from all selected chains do
+  // not accumulate forever. Favorites/recipes keep their own user snapshots.
+  ps.clear();
   for(const p of products||[])ps.put(p);
   // Offers store contains current state only, so stale prices do not accumulate here.
   os.clear();
