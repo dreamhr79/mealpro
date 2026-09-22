@@ -98,12 +98,25 @@ async function dbSearchProducts(q,limit=80){
 
 async function dbSearchProductsWithOffers(q,limit=80){
  const products=await dbSearchProducts(q,limit);
- const out=[];
- for(const product of products){
-  const offers=await dbGetOffersByProductKey(product.id);
-  if(offers.length)out.push({product,offers});
- }
- return out;
+ if(!products.length)return [];
+ const keys=new Set(products.map(p=>p.id));
+ const d=await openDB();
+ const grouped=new Map();
+ await new Promise((res,rej)=>{
+  const req=d.transaction('offers').objectStore('offers').openCursor();
+  req.onsuccess=()=>{
+   const cur=req.result;
+   if(!cur){res();return;}
+   const offer=cur.value;
+   if(keys.has(offer.productKey)){
+    if(!grouped.has(offer.productKey))grouped.set(offer.productKey,[]);
+    grouped.get(offer.productKey).push(offer);
+   }
+   cur.continue();
+  };
+  req.onerror=()=>rej(req.error||Error('Dohvat aktualnih ponuda nije uspio.'));
+ });
+ return products.map(product=>({product,offers:grouped.get(product.id)||[]})).filter(x=>x.offers.length);
 }
 
 async function dbGetOffersByProductKey(productKey){
