@@ -57,7 +57,11 @@ function normalizeBarcode(value) {
 
 function canonicalProductKey(product) {
   const barcode = normalizeBarcode(product?.barcode);
-  return barcode ? `ean:${barcode}` : `catalog:${String(product?.id || product?.externalId || '')}`;
+  if (barcode) return `ean:${barcode}`;
+  // Products without EAN must not collide across chains when external ids overlap.
+  // Prefer the already chain-qualified row id; only then fall back to external id.
+  const sourceId = String(product?.id || product?.externalId || '').trim();
+  return sourceId ? `source:${sourceId}` : '';
 }
 
 function offerFromCatalogRow(row) {
@@ -106,6 +110,7 @@ function buildNormalizedCatalogModel(rows) {
   const offers = [];
   for (const row of rows || []) {
     const product = canonicalProductFromCatalogRow(row);
+    if (!product.id) continue;
     if (!products.has(product.id)) products.set(product.id, product);
     offers.push(offerFromCatalogRow(row));
   }
@@ -1844,7 +1849,7 @@ $('#syncStart').onclick = async () => {
       offersByKey.get(offer.productKey).push(offer);
     }
     for (const f of favorites) {
-      const productKey = f.id?.startsWith('ean:') || f.id?.startsWith('catalog:')
+      const productKey = f.id?.startsWith('ean:') || f.id?.startsWith('source:')
         ? f.id
         : (normalizeBarcode(f.barcode) ? `ean:${normalizeBarcode(f.barcode)}` : '');
       if (!productKey) continue;
