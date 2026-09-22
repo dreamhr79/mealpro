@@ -958,17 +958,7 @@ async function favoriteFromCatalog(productKey) {
   const existingFav = findFavoriteForCatalog(p, allOffers, productKey);
 
   if (existingFav) {
-    existingFav.catalogId = bestOffer.id;
-    existingFav.name = p.name || existingFav.name;
-    existingFav.brand = p.brand || existingFav.brand || '';
-    existingFav.barcode = p.barcode || existingFav.barcode || '';
-    existingFav.price = bestOffer.price;
-    existingFav.store = bestOffer.store;
-    existingFav.pack = p.pack || bestOffer.pack;
-    existingFav.unit = p.unit || bestOffer.unit;
-    existingFav.pricePer100 = bestOffer.pricePer100;
-    existingFav.onSale = bestOffer.onSale;
-    existingFav.offers = favoriteOfferSnapshot(allOffers);
+    Object.assign(existingFav, applyCatalogStateToFavorite(existingFav, p, allOffers));
     await dbPut('favorites', existingFav);
     await propagateProductUpdate(existingFav);
     await loadAll();
@@ -1942,22 +1932,16 @@ $('#syncStart').onclick = async () => {
       if (!productKey) continue;
       const product = productByKey.get(productKey);
       let offers = offersByKey.get(productKey) || [];
-      if (!product || !offers.length) continue;
-      offers = sortOffersByPrice(offers);
-      const best = offers[0];
-      Object.assign(f, {
-        catalogId: best.id,
-        barcode: product.barcode || f.barcode || '',
-        name: product.name || f.name,
-        brand: product.brand || f.brand || '',
-        price: best.price,
-        store: best.store,
-        pack: product.pack || best.pack,
-        unit: product.unit || best.unit,
-        pricePer100: best.pricePer100,
-        onSale: best.onSale,
-        offers: favoriteOfferSnapshot(offers)
-      });
+      if (!product || !offers.length) {
+        if (f.catalogId || directKey || barcodeKey) {
+          const unavailable = { ...f, catalogAvailable: false, offers: [], onSale: false };
+          await dbPut('favorites', unavailable);
+          await propagateProductUpdate(unavailable);
+        }
+        continue;
+      }
+      const refreshed = applyCatalogStateToFavorite(f, product, offers);
+      Object.assign(f, refreshed);
       await dbPut('favorites', f);
       await propagateProductUpdate(f);
     }
