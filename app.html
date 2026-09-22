@@ -19,7 +19,7 @@
  </div>
  <div style="display:flex;align-items:center;gap:10px">
   <div id="syncState" class="syncState pill">Baza nije sinkronizirana</div>
-  <button id="quickSyncBtn" class="secondary" style="padding:7px 12px;font-size:12px">🔄 Osvježi cjenike</button>
+  <button id="quickSyncBtn" class="secondary" style="padding:7px 12px;font-size:12px">🔄 Osvježi bazu</button>
  </div>
 </header>
 
@@ -204,7 +204,7 @@
     <h2>🇭🇷 Baza cijene.dev</h2>
     <p>Preko 50.000 artikala s cijenama i akcijama hrvatskih trgovačkih lanaca. Pretraživanje je trenutno zahvaljujući IndexedDB tokenima.</p>
    </div>
-   <button id="syncBtn">🔄 Sinkroniziraj cjenike (ZIP)</button>
+   <button id="syncBtn">🔄 Provjeri centralnu bazu</button>
   </div>
   <div class="card">
    <div class="searchRow">
@@ -390,28 +390,23 @@
 
 <!-- DIALOG: Sinkronizacija cijene.dev -->
 <dialog id="syncDialog">
- <div>
-  <h3 style="margin-top:0">Sinkronizacija cjenika s cijene.dev</h3>
-  <p class="hint">Preuzima se najnovija službena arhiva. Odaberi samo lance u kojima kupuješ kako bi baza bila optimalna i brza.</p>
-  <div id="chainChecks" class="checks" style="margin:16px 0"></div>
-  <div id="syncProgress" class="progress">Spremno za preuzimanje.</div>
-    <div style="margin-top:12px;border-top:1px solid #dce3ec;padding-top:10px">
-      <label style="font-size:12px;font-weight:700;margin-bottom:4px">Ili ručno učitaj skinuti ZIP s cijenama (zaobilazi CORS):</label>
-      <input type="file" id="syncZipFileInput" accept=".zip" style="font-size:12px;width:100%">
-    </div>
-  <div class="actions" style="margin-top:16px">
+ <div class="dialogInner">
+  <h3 style="margin-top:0">Centralna baza cijena</h3>
+  <p class="muted">MealPro koristi centralni Supabase katalog. ZIP s cijene.dev obrađuje se na serveru; preglednik ga više ne preuzima.</p>
+  <div id="syncProgress" class="progress">Provjeravam stanje centralne baze…</div>
+  <div class="dialogActions">
    <button id="syncCancel" class="secondary">Zatvori</button>
-   <button id="syncStart">Započni preuzimanje</button>
+   <button id="syncStart">Provjeri sada</button>
   </div>
  </div>
 </dialog>
 
 <script src="cache-reset.js"></script>
-  <script src="db.js?v=supabase1"></script>
-<script src="zip.js?v=supabase1"></script>
-<script src="config.js?v=supabase1"></script>
-<script src="supabase-catalog-adapter.js?v=supabase1"></script>
-<script src="catalog-repository.js?v=supabase1"></script>
-<script src="app.js?v=supabase1"></script>
+  <script src="db.js?v=central2"></script>
+<script src="zip.js?v=central2"></script>
+<script src="config.js?v=central2"></script>
+<script src="supabase-catalog-adapter.js?v=central2"></script>
+<script src="catalog-repository.js?v=central2"></script>
+<script src="app.js?v=central2"></script>
 </body>
 </html>
