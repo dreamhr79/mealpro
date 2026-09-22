@@ -107,14 +107,32 @@ function canonicalProductFromCatalogRow(row) {
 
 function buildNormalizedCatalogModel(rows) {
   const products = new Map();
-  const offers = [];
+  const offersById = new Map();
   for (const row of rows || []) {
     const product = canonicalProductFromCatalogRow(row);
     if (!product.id) continue;
-    if (!products.has(product.id)) products.set(product.id, product);
-    offers.push(offerFromCatalogRow(row));
+
+    // One canonical product per identity. Prefer the richer/newer row when the
+    // same EAN appears with missing metadata in another chain.
+    const existing = products.get(product.id);
+    if (!existing) {
+      products.set(product.id, product);
+    } else {
+      const merged = { ...existing };
+      if (!merged.name && product.name) merged.name = product.name;
+      if (!merged.brand && product.brand) merged.brand = product.brand;
+      if (!(Number(merged.pack) > 0) && Number(product.pack) > 0) merged.pack = product.pack;
+      if ((!merged.unit || merged.unit === 'kom') && product.unit && product.unit !== 'kom') merged.unit = product.unit;
+      merged.search = norm(`${merged.name || ''} ${merged.brand || ''} ${merged.barcode || ''}`);
+      merged.tokens = tokens(merged.search);
+      products.set(product.id, merged);
+    }
+
+    const offer = offerFromCatalogRow(row);
+    const prev = offersById.get(offer.id);
+    if (!prev || (offer.price > 0 && offer.price < prev.price)) offersById.set(offer.id, offer);
   }
-  return { products: [...products.values()], offers };
+  return { products: [...products.values()], offers: [...offersById.values()] };
 }
 
 function packFromName(name) {
@@ -238,7 +256,8 @@ function repairProductPackage(p) {
   // Ako je jedinica 'kom', ali u nazivu ima npr. "500 g", "1 l", "150g", "400ml" etc.
   if (p.unit === 'kom' || !p.unit || Number(p.pack) <= 1) {
     const fn = packFromName(p.name);
-    if (fn && fn.pack >= 5) {
+    const validNamedPack = fn && ((fn.unit === 'kom' && fn.pack >= 1) || fn.pack >= 5);
+    if (validNamedPack) {
       p.pack = fn.pack;
       p.unit = fn.unit;
       if (p.price > 0 && p.pack > 0 && (p.unit === 'g' || p.unit === 'ml')) {
