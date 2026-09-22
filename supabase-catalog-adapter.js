@@ -74,7 +74,12 @@ const SupabaseCatalogAdapter = (() => {
       };
     }
 
-    return { search, getProduct };
+    async function status() {
+      const rows = await request('catalog_syncs?select=id,archive_date,products_count,offers_count,status,started_at,finished_at&status=eq.success&order=finished_at.desc&limit=1');
+      return rows[0] || null;
+    }
+
+    return { search, getProduct, status };
   }
 
   return { create };
