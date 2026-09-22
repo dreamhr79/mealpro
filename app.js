@@ -1624,6 +1624,7 @@ $('#syncStart').onclick = async () => {
       }
     }
 
+    if (!all.length) throw Error('U odabranim lancima nisu pronađeni valjani artikli. Postojeća baza nije promijenjena.');
     log(`Spremam ${all.length.toLocaleString('hr-HR')} artikala u bazu…`);
     await dbClear('catalog');
     await dbBulkPut('catalog', all, (n, t) => log(`Spremanje: ${n.toLocaleString('hr-HR')} / ${t.toLocaleString('hr-HR')}`));
