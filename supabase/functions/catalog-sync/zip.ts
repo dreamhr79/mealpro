@@ -49,3 +49,48 @@ export async function readRemoteZipText(url:string,entry:ZipEntry){
   const out=entry.method===0?raw:entry.method===8?await inflateRaw(raw):(()=>{throw new Error("Unsupported ZIP compression "+entry.method)})();
   return new TextDecoder().decode(out);
 }
+
+
+async function entryStream(url:string,entry:ZipEntry){
+  const header=await range(url,entry.localOffset,entry.localOffset+29);
+  const hv=new DataView(header.buffer,header.byteOffset,header.byteLength);
+  if(u32(hv,0)!==0x04034b50)throw new Error("Invalid ZIP local header");
+  const nameLen=u16(hv,26),extraLen=u16(hv,28),start=entry.localOffset+30+nameLen+extraLen;
+  const res=await fetch(url,{headers:{Range:`bytes=${start}-${start+entry.compressedSize-1}`}});
+  if(res.status!==206||!res.body)throw new Error(`Archive entry range failed: ${res.status}`);
+  if(entry.method===0)return res.body;
+  if(entry.method===8)return res.body.pipeThrough(new DecompressionStream("deflate-raw"));
+  throw new Error("Unsupported ZIP compression "+entry.method);
+}
+
+export async function readRemoteZipCsv(url:string,entry:ZipEntry,visit:(row:string[],index:number)=>void|Promise<void>){
+  const stream=await entryStream(url,entry);
+  const reader=stream.pipeThrough(new TextDecoderStream()).getReader();
+  let row:string[]=[],cur="",quoted=false,index=0,pendingQuote=false;
+  const emit=async()=>{row.push(cur.replace(/\r$/,""));cur="";await visit(row,index++);row=[];};
+  while(true){
+    const {value,done}=await reader.read(); if(done)break;
+    const chunk=value||"";
+    for(let i=0;i<chunk.length;i++){
+      const ch=chunk[i];
+      if(quoted){
+        if(ch==='"'){
+          if(i+1<chunk.length&&chunk[i+1]==='"'){cur+='"';i++;}
+          else if(i===chunk.length-1){pendingQuote=true;}
+          else quoted=false;
+        }else cur+=ch;
+      }else{
+        if(pendingQuote){
+          pendingQuote=false;
+          if(ch==='"'){cur+='"';quoted=true;continue;}
+        }
+        if(ch==='"')quoted=true;
+        else if(ch===','){row.push(cur);cur="";}
+        else if(ch==='\n')await emit();
+        else cur+=ch;
+      }
+    }
+    if(pendingQuote){quoted=false;pendingQuote=false;}
+  }
+  if(cur||row.length)await emit();
+}
