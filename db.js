@@ -108,6 +108,23 @@ async function dbGetOffersByBarcode(barcode){
  });
 }
 
+async function dbGetOffersByProductKey(productKey){
+ if(!productKey)return [];
+ const d=await openDB();
+ return new Promise((res,rej)=>{
+  const req=d.transaction('offers').objectStore('offers').index('productKey').getAll(IDBKeyRange.only(productKey));
+  req.onsuccess=()=>res(req.result||[]);
+  req.onerror=()=>rej(req.error||Error('Dohvat aktualnih ponuda nije uspio.'));
+ });
+}
+
+async function dbGetProductWithOffers(productKey){
+ const product=await dbGet('products',productKey);
+ if(!product)return null;
+ const offers=await dbGetOffersByProductKey(productKey);
+ return {product,offers};
+}
+
 
 async function dbReplaceStores(dataByStore){
  const entries=Object.entries(dataByStore||{});
