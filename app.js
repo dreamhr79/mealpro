@@ -127,9 +127,11 @@ function resolveMealItemProduct(it) {
   if (!it) return { id: id(), name: 'Nepoznato', pack: 100, unit: 'g', price: 0, kcal: 0, protein: 0, carbs: 0, fat: 0 };
   let p = it.product;
   if (!p && it.productId != null) {
+    // Catalog is intentionally not kept in a global in-memory array. Older recipes may
+    // only contain productId, so resolve against persisted user products and gracefully
+    // fall back to the snapshot data below instead of throwing on an undefined `products`.
     p = favorites.find(f => String(f.id) === String(it.productId) || String(f.catalogId) === String(it.productId))
-     || custom.find(c => String(c.id) === String(it.productId))
-     || products.find(x => String(x.id) === String(it.productId));
+     || custom.find(c => String(c.id) === String(it.productId));
   }
   if (!p) {
     p = it.product || {
