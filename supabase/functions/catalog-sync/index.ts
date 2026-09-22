@@ -56,10 +56,15 @@ async function clearStage() {
   await supabase("catalog_products_stage?id=not.is.null", {method:"DELETE"});
 }
 async function applyStage(syncId:number) {
-  return supabase("rpc/apply_staged_catalog", {
+  const applied = await supabase("rpc/apply_staged_catalog", {
     method:"POST",
     body:JSON.stringify({p_sync_id:syncId,p_observed_at:new Date().toISOString()})
   });
+  const pruned = await supabase("rpc/prune_catalog_price_history", {
+    method:"POST",
+    body:JSON.stringify({p_keep:30})
+  });
+  return { applied, pruned };
 }
 
 async function failSync(id: number | undefined, message: string) {
@@ -120,6 +125,7 @@ Deno.serve(async (req) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    try { await clearStage(); } catch (_) {}
     try { await failSync(syncId, message); } catch (_) {}
     return Response.json({ok:false,error:message},{status:500});
   }
