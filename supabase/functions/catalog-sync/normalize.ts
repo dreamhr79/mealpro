@@ -21,14 +21,16 @@ function barcode(v:unknown) {
   const code=String(v ?? "").replace(/\D/g,"");
   return code.length>=8?code:"";
 }
-export function parseCsv(text:string) {
-  const rows:string[][]=[]; let row:string[]=[],cur="",q=false;
-  for(let i=0;i<text.length;i++){const c=text[i];
-    if(q){if(c==='"'&&text[i+1]==='"'){cur+='"';i++;}else if(c==='"')q=false;else cur+=c;}
-    else if(c==='"')q=true; else if(c===","){row.push(cur);cur="";}
-    else if(c==="\n"){row.push(cur.replace(/\r$/,""));rows.push(row);row=[];cur="";} else cur+=c;
+function csvRows(text:string, visit:(row:string[], index:number)=>void) {
+  let row:string[]=[],cur="",q=false,index=0;
+  for(let i=0;i<text.length;i++){const ch=text[i];
+    if(q){if(ch==='"'&&text[i+1]==='"'){cur+='"';i++;}else if(ch==='"')q=false;else cur+=ch;}
+    else if(ch==='"')q=true;
+    else if(ch===","){row.push(cur);cur="";}
+    else if(ch==="\n"){row.push(cur.replace(/\r$/,""));visit(row,index++);row=[];cur="";}
+    else cur+=ch;
   }
-  if(cur||row.length){row.push(cur);rows.push(row);} return rows;
+  if(cur||row.length){row.push(cur);visit(row,index);}
 }
 function packFromName(name:string){
   const s=String(name||"").toLowerCase().replace(/,/g,".").replace(/\s+/g," ").trim();
@@ -48,18 +50,18 @@ function smartPack(rawQty:string,rawUnit:string,name:string,price:number,ppu:num
   return{pack:q>0?q:100,unit};
 }
 export function parseChain(chain:string,productsText:string,pricesText:string):CatalogRow[]{
-  const prices=parseCsv(pricesText),best=new Map<string,{price:number;ppu:number|null;sale:boolean}>();
-  for(let i=1;i<prices.length;i++){const c=prices[i],pid=(c[1]||"").trim(),regular=nval(c[2]),special=nval(c[6]);
-    const sale=!!special,price=sale?special:regular;if(!pid||!price)continue;const prev=best.get(pid);
+  const best=new Map<string,{price:number;ppu:number|null;sale:boolean}>();
+  csvRows(pricesText,(c,i)=>{if(i===0)return;const pid=(c[1]||"").trim(),regular=nval(c[2]),special=nval(c[6]);
+    const sale=!!special,price=sale?special:regular;if(!pid||!price)return;const prev=best.get(pid);
     if(!prev||price<prev.price)best.set(pid,{price,ppu:nval(c[3]),sale});
-  }
-  const out:CatalogRow[]=[],products=parseCsv(productsText);
-  for(let i=1;i<products.length;i++){const c=products[i],pid=(c[0]||"").trim(),name=(c[2]||"").trim(),bp=best.get(pid);
-    if(!pid||!name||!bp)continue;const pu=smartPack(c[6],c[5],name,bp.price,bp.ppu),code=barcode(c[1]);
+  });
+  const out:CatalogRow[]=[];
+  csvRows(productsText,(c,i)=>{if(i===0)return;const pid=(c[0]||"").trim(),name=(c[2]||"").trim(),bp=best.get(pid);
+    if(!pid||!name||!bp)return;const pu=smartPack(c[6],c[5],name,bp.price,bp.ppu),code=barcode(c[1]);
     out.push({id:`${chain}:${pid}`,externalId:pid,barcode:code,name,brand:(c[3]||"").trim(),pack:pu.pack,unit:pu.unit,
       price:bp.price,pricePer100:(pu.unit==="g"||pu.unit==="ml")&&pu.pack>0?bp.price/pu.pack*100:null,onSale:bp.sale,
       store:CHAINS[chain]||chain,search:norm(`${name} ${c[3]||""} ${code}`)});
-  }
+  });
   return out;
 }
 export function normalizeRows(rows:CatalogRow[]){
