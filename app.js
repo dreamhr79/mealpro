@@ -361,6 +361,7 @@ document.getElementById('cancelEditingRecipe')?.addEventListener('click', () => 
 });
 
 $('#saveRecipe').onclick = async () => {
+  try {
   const name = $('#mealName').value.trim();
   if (!name) return alert('Upiši naziv obroka.');
   if (!meal.items.length) return alert('Dodaj barem jednu namirnicu.');
@@ -417,9 +418,14 @@ $('#saveRecipe').onclick = async () => {
   updateEditingBanner();
   $('#recipeCount').textContent = `(${recipes.length})`;
   showToast(`Recept "${name}" je spremljen!`);
+  } catch (err) {
+    console.error('Recipe save error:', err);
+    showToast('Spremanje recepta nije uspjelo. Postojeći podaci nisu obrisani.');
+  }
 };
 
 document.getElementById('saveRecipeCopy')?.addEventListener('click', async () => {
+  try {
   const baseName = $('#mealName').value.trim() || 'Recept';
   const copyName = baseName.includes('(kopija)') ? baseName : `${baseName} (kopija)`;
   const serv = Math.max(1, Number($('#mealServings').value || 1));
@@ -443,6 +449,10 @@ document.getElementById('saveRecipeCopy')?.addEventListener('click', async () =>
   updateEditingBanner();
   $('#recipeCount').textContent = `(${recipes.length})`;
   showToast(`Spremljeno kao novi recept: "${copyName}"!`);
+  } catch (err) {
+    console.error('Recipe copy save error:', err);
+    showToast('Spremanje kopije recepta nije uspjelo.');
+  }
 });
 
 $('#addMealToDayPlan').onclick = async () => {
