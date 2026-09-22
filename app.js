@@ -759,7 +759,12 @@ async function searchCatalog(inp, out) {
   
   // Uvijek osvježi najnovije favorite iz baze prije prikaza
   favorites = await dbAll('favorites');
-  const rows = await dbSearchCatalog(q, 150);
+  const normalizedRows = await dbSearchProductsWithOffers(q, 150);
+  const rows = normalizedRows.map(({ product, offers }) => {
+    const sorted = sortOffersByPrice(offers);
+    const best = sorted[0];
+    return { ...product, ...best, id: best.id, barcode: product.barcode, name: product.name, brand: product.brand, pack: product.pack || best.pack, unit: product.unit || best.unit, _offers: sorted };
+  });
 
   // Group search results by barcode (or product identity) so user gets 1 entry with all store offers
   const groupMap = new Map();
@@ -775,11 +780,13 @@ async function searchCatalog(inp, out) {
         }
       }
     }
-    const key = (item.barcode && String(item.barcode).replace(/\D/g, '').length >= 8) 
-      ? `ean:${String(item.barcode).replace(/\D/g, '')}` 
-      : `txt:${norm(item.name)}|${item.pack}|${item.unit}`;
+    const key = canonicalProductKey(item);
     if (!groupMap.has(key)) groupMap.set(key, []);
-    groupMap.get(key).push(item);
+    const normalizedOffers = Array.isArray(item._offers) && item._offers.length ? item._offers.map(o => ({
+      ...item, ...o, id: o.id, barcode: item.barcode, name: item.name, brand: item.brand,
+      pack: item.pack || o.pack, unit: item.unit || o.unit
+    })) : [item];
+    groupMap.get(key).push(...normalizedOffers);
   }
 
   // Find best offer in each group and sort groups by value per 100g (cheapest per gram first)
