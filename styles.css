@@ -368,3 +368,11 @@ main {
 .recipeTrend.up{color:#a63b27;background:#fff0ec}
 .recipeTrend.down{color:#087a55;background:#eaf8f2}
 .recipeTrend.flat{color:var(--muted)}
+
+.recipeWhy{margin-top:6px;font-size:12px;color:var(--muted)}
+.recipeWhy summary{cursor:pointer;font-weight:700;color:var(--ink)}
+.recipeWhy div{display:grid;gap:3px;margin-top:5px}
+.recipeWhy span{display:flex;justify-content:space-between;gap:12px}
+.recipeServingCustom{display:inline-flex;gap:4px;align-items:center}
+.recipeServingInput{width:58px;padding:7px 6px}
+@media(max-width:760px){.recipeServingCustom{width:100%}.recipeServingInput{flex:0 0 64px}.recipeServingCustom button{flex:1}}
