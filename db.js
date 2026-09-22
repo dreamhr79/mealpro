@@ -1,4 +1,4 @@
-const DB_NAME='cijeneMealProDB',DB_VER=4;
+const DB_NAME='cijeneMealProDB',DB_VER=5;
 let _db;
 function openDB(){
  if(_db)return Promise.resolve(_db);
@@ -6,11 +6,8 @@ function openDB(){
   const r=indexedDB.open(DB_NAME,DB_VER);
   r.onupgradeneeded=()=>{
    const d=r.result;
-   if(!d.objectStoreNames.contains('catalog')){
-    const cat=d.createObjectStore('catalog',{keyPath:'id'});
-    cat.createIndex('tokens','tokens',{multiEntry:true});
-    cat.createIndex('barcode','barcode');
-   }
+   // v5 removes the legacy raw catalog after migration to products + offers.
+   if(d.objectStoreNames.contains('catalog'))d.deleteObjectStore('catalog');
    if(!d.objectStoreNames.contains('favorites'))d.createObjectStore('favorites',{keyPath:'id'});
    if(!d.objectStoreNames.contains('custom'))d.createObjectStore('custom',{keyPath:'id'});
    if(!d.objectStoreNames.contains('recipes'))d.createObjectStore('recipes',{keyPath:'id'});
@@ -75,32 +72,6 @@ async function dbReplaceStore(store,rows,onProgress){
   tx.onabort=()=>rej(tx.error||Error('Transakcija zamjene baze je prekinuta.'));
  });
 }
-async function dbSearchCatalog(q,limit=80){
- const words=norm(q).split(/\s+/).filter(Boolean);
- if(!words.length)return [];
- const d=await openDB(),idx=d.transaction('catalog').objectStore('catalog').index('tokens');
- const prefix=words[0],range=IDBKeyRange.bound(prefix,prefix+'\uffff'),rows=[];
- return new Promise((res,rej)=>{
-  const req=idx.openCursor(range);
-  req.onsuccess=()=>{
-   const c=req.result;
-   if(!c||rows.length>=450){
-    const seen=new Set(),out=[];
-    for(const x of rows){
-     if(!words.every(w=>x.search.includes(w)))continue;
-     const k=x.barcode||x.id;
-     if(seen.has(k))continue;
-     seen.add(k);out.push(x);
-     if(out.length>=limit)break;
-    }
-    res(out);return;
-   }
-   rows.push(c.value);c.continue();
-  };
-  req.onerror=()=>rej(req.error || Error('Greška pri pretraživanju kataloga.'));
- });
-}
-
 async function dbSearchProducts(q,limit=80){
  const words=norm(q).split(/\s+/).filter(Boolean);
  if(!words.length)return [];
@@ -133,17 +104,6 @@ async function dbSearchProductsWithOffers(q,limit=80){
   if(offers.length)out.push({product,offers});
  }
  return out;
-}
-
-async function dbGetOffersByBarcode(barcode){
- const code = String(barcode || '').replace(/\D/g, '');
- if (code.length < 8) return [];
- const d = await openDB();
- return new Promise(res => {
-  const req = d.transaction('catalog').objectStore('catalog').index('barcode').getAll(IDBKeyRange.only(code));
-  req.onsuccess = () => res(req.result || []);
-  req.onerror = () => res([]);
- });
 }
 
 async function dbGetOffersByProductKey(productKey){
