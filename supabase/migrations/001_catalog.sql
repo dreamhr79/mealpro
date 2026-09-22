@@ -77,3 +77,10 @@ create policy "public catalog offers read"
 on public.offers for select
 to anon, authenticated
 using (true);
+
+-- Clients may read synchronization status, but never write it.
+drop policy if exists "public catalog sync status read" on public.catalog_syncs;
+create policy "public catalog sync status read"
+on public.catalog_syncs for select
+to anon, authenticated
+using (true);
