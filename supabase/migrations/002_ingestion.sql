@@ -2,6 +2,15 @@
 -- Client apps never call these functions. They are intended for a trusted
 -- backend/Edge Function running with the Supabase service role.
 
+create unlogged table if not exists public.catalog_products_stage (
+  like public.products including defaults
+);
+
+create unlogged table if not exists public.catalog_offers_stage (
+  like public.offers including defaults
+);
+
+
 create or replace function public.record_catalog_price_changes(p_observed_at timestamptz default now())
 returns integer
 language plpgsql
@@ -21,14 +30,6 @@ begin
   return inserted_count;
 end;
 $$;
-
-create unlogged table if not exists public.catalog_products_stage (
-  like public.products including defaults
-);
-
-create unlogged table if not exists public.catalog_offers_stage (
-  like public.offers including defaults
-);
 
 revoke all on public.catalog_products_stage from anon, authenticated;
 revoke all on public.catalog_offers_stage from anon, authenticated;
