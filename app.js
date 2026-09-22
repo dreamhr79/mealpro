@@ -1523,16 +1523,33 @@ $('#goalKcal').oninput = () => {
   balanceMacros('');
 };
 $('#goalKcal').onchange = persistMacroGoals;
-$('#lockKcal').onclick = () => {
-  dayPlan.settings.kcalLocked = !dayPlan.settings.kcalLocked;
-  saveDayPlan();
-  renderDayPlan();
+$('#lockKcal').onclick = async () => {
+  const previous = dayPlan.settings.kcalLocked;
+  dayPlan.settings.kcalLocked = !previous;
+  try {
+    await saveDayPlan();
+    renderDayPlan();
+  } catch (err) {
+    dayPlan.settings.kcalLocked = previous;
+    console.error('Kcal lock save error:', err);
+    showToast('Spremanje postavke kalorija nije uspjelo.');
+  }
 };
-$('#macroBalance').onchange = () => {
+$('#macroBalance').onchange = async () => {
+  const previous = dayPlan.settings.balance;
+  const previousGoals = { ...dayPlan.goals };
   dayPlan.settings.balance = $('#macroBalance').value;
   if (dayPlan.settings.kcalLocked) balanceMacros('');
-  saveDayPlan();
-  renderDayPlan();
+  try {
+    await saveDayPlan();
+    renderDayPlan();
+  } catch (err) {
+    dayPlan.settings.balance = previous;
+    dayPlan.goals = previousGoals;
+    console.error('Macro balance save error:', err);
+    showToast('Spremanje postavke makro balansa nije uspjelo.');
+    renderDayPlan();
+  }
 };
 
 // === SMART SHOPPING LIST ===
