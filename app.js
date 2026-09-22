@@ -802,6 +802,31 @@ document.addEventListener('click', async e => {
     }
   }
   if (b.classList.contains('loadRecipe')) loadRecipe(b.dataset.id);
+  if (b.classList.contains('recipeUseAlternative')) {
+    const recipe = recipes.find(x => x.id === b.dataset.recipeId);
+    const source = b.dataset.altSource === 'Favorit' ? favorites : custom;
+    const replacement = source.find(x => String(x.id) === String(b.dataset.altId));
+    const item = recipe?.items?.find(it => {
+      const p = resolveMealItemProduct(it);
+      return String(p.id) === String(b.dataset.productId) || String(it.productId) === String(b.dataset.productId);
+    });
+    if (recipe && replacement && item) {
+      const before = structuredClone(recipe);
+      item.productId = replacement.id;
+      item.product = structuredClone(replacement);
+      try {
+        recipe.updatedAt = new Date().toISOString();
+        await dbPut('recipes', recipe);
+        await trackRecipePrice(recipe);
+        renderRecipes();
+        showToast(`Zamijenjeno s jeftinijim proizvodom: ${replacement.name}`);
+      } catch (err) {
+        Object.assign(recipe, before);
+        console.error('Recipe alternative error:', err);
+        showToast('Zamjena proizvoda nije uspjela.');
+      }
+    }
+  }
   if (b.classList.contains('recipeDayPlan')) await addRecipeToDayPlan(b.dataset.id, 1);
   if (b.classList.contains('recipeScale')) loadScaledRecipe(b.dataset.id, b.dataset.servings);
   if (b.classList.contains('recipeScaleCustom')) {
@@ -1357,13 +1382,35 @@ function preferredRecipeProduct(item) {
   return { product: resolveMealItemProduct(item), source: snapshot?.catalogId || snapshot?.barcode ? 'Baza' : 'Spremljeno' };
 }
 
+function comparableRecipeProduct(a, b) {
+  if (!a || !b) return false;
+  const aUnit = String(a.unit || ''), bUnit = String(b.unit || '');
+  if (aUnit !== bUnit) return false;
+  const aCategory = getFavoriteCategory(a), bCategory = getFavoriteCategory(b);
+  if (aCategory !== 'Ostalo' && aCategory === bCategory) return true;
+  const aWords = new Set(tokens(`${a.name || ''} ${a.brand || ''}`));
+  const bWords = tokens(`${b.name || ''} ${b.brand || ''}`);
+  return bWords.some(w => w.length >= 4 && aWords.has(w));
+}
+
+function cheaperRecipeAlternative(product) {
+  const currentValue = getUnitValuePer100(product);
+  if (!(Number.isFinite(currentValue) && currentValue > 0)) return null;
+  const candidates = [...favorites.map(p => ({ product: p, source: 'Favorit' })), ...custom.map(p => ({ product: p, source: 'Moj proizvod' }))]
+    .filter(x => String(x.product.id) !== String(product.id) && x.product.catalogAvailable !== false && comparableRecipeProduct(product, x.product))
+    .map(x => ({ ...x, value: getUnitValuePer100(x.product) }))
+    .filter(x => Number.isFinite(x.value) && x.value > 0 && x.value < currentValue * 0.995)
+    .sort((a,b) => a.value - b.value);
+  return candidates[0] || null;
+}
+
 function recipeLiveState(recipe) {
   const items = (Array.isArray(recipe?.items) ? recipe.items : [])
     .filter(it => Number(it?.qty) > 0)
     .map(it => {
       const preferred = preferredRecipeProduct(it);
       const product = preferred.product;
-      return { ...it, productId: product.id || it.productId || null, product, priceSource: preferred.source };
+      return { ...it, productId: product.id || it.productId || null, product, priceSource: preferred.source, cheaperAlternative: cheaperRecipeAlternative(product) };
     });
   const servings = Math.max(1, Number(recipe?.servings) || 1);
   let totals = { kcal: 0, protein: 0, carbs: 0, fat: 0, cost: 0 };
@@ -1520,7 +1567,10 @@ function renderRecipes() {
       <div class="recipeItems">
         ${items.map(x => {
           const unavailable = x.product.catalogAvailable === false ? '<span class="saleBadgeMini">nije u aktualnom katalogu</span>' : '';
-          return `<div class="recipeIngredient"><span><b>${esc(x.product.name)}</b> <small class="recipeSource">${esc(x.priceSource || '')}</small> ${unavailable}</span><span>${num(x.qty, 0)} ${esc(x.product.unit || 'g')} · ${eur(itemCost(x.product, x.qty))}</span></div>`;
+          const alt = x.cheaperAlternative;
+          const saving = alt ? itemCost(x.product, x.qty) - itemCost(alt.product, x.qty) : 0;
+          const alternative = alt && saving > 0.004 ? `<div class="recipeAlternative">Jeftinija alternativa: <b>${esc(alt.product.name)}</b> · ${alt.source} · ušteda ${eur(saving)} <button class="secondary recipeUseAlternative" data-recipe-id="${r.id}" data-product-id="${x.productId}" data-alt-source="${alt.source}" data-alt-id="${alt.product.id}">Zamijeni</button></div>` : '';
+          return `<div class="recipeIngredientWrap"><div class="recipeIngredient"><span><b>${esc(x.product.name)}</b> <small class="recipeSource">${esc(x.priceSource || '')}</small> ${unavailable}</span><span>${num(x.qty, 0)} ${esc(x.product.unit || 'g')} · ${eur(itemCost(x.product, x.qty))}</span></div>${alternative}</div>`;
         }).join('')}
       </div>
       ${instructionsHtml}
