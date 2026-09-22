@@ -106,8 +106,10 @@ Deno.serve(async (req) => {
     if (requestBody?.mode === "stage") {
       const products = Array.isArray(requestBody.products) ? requestBody.products : [];
       const offers = Array.isArray(requestBody.offers) ? requestBody.offers : [];
-      if (products.length) await stageRows("catalog_products_stage", products);
-      if (offers.length) await stageRows("catalog_offers_stage", offers);
+      // Products may repeat across stores/batches because EAN is canonical. Upsert them.
+      // Offers are source/store-specific and can be upserted as well, making retries idempotent.
+      if (products.length) await supabase("catalog_products_stage?on_conflict=id", {method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify(products)});
+      if (offers.length) await supabase("catalog_offers_stage?on_conflict=id", {method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify(offers)});
       return Response.json({ok:true,products:products.length,offers:offers.length},{headers:corsHeaders});
     }
     if (requestBody?.mode === "publish") {
