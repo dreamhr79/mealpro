@@ -1072,7 +1072,7 @@ $('#lookupOffBtn').onclick = async () => {
   }
 };
 
-async function propagateProductUpdate(updatedObj) {
+async async function propagateProductUpdate(updatedObj) {
   const matches = it => {
     if (!it) return false;
     const p = it.product || {};
@@ -1345,7 +1345,7 @@ function renderDayPlan() {
   $('#dayTotalPrice').textContent = eur(dt.price);
 }
 
-async function saveDayPlan() {
+async async function saveDayPlan() {
   await dbPut('meta', { key: 'dayPlan', val: dayPlan });
 }
 
