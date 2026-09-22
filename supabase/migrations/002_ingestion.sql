@@ -43,6 +43,11 @@ declare
   v_changes integer;
   v_removed integer;
 begin
+  -- Transaction-scoped lock: only one publisher may replace the catalog at a time.
+  if not pg_try_advisory_xact_lock(77432791) then
+    raise exception 'Catalog sync already running';
+  end if;
+
   select count(*)::integer into v_products from public.catalog_products_stage;
   select count(*)::integer into v_offers from public.catalog_offers_stage;
   if v_products = 0 or v_offers = 0 then
