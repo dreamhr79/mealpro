@@ -80,3 +80,21 @@ async function dbGetOffersByBarcode(barcode){
   req.onerror = () => res([]);
  });
 }
+
+
+async function dbReplaceStores(dataByStore){
+ const entries=Object.entries(dataByStore||{});
+ if(!entries.length)return;
+ const d=await openDB();
+ return new Promise((res,rej)=>{
+  const tx=d.transaction(entries.map(([store])=>store),'readwrite');
+  for(const [store,rows] of entries){
+   const os=tx.objectStore(store);
+   os.clear();
+   for(const row of rows||[])os.put(row);
+  }
+  tx.oncomplete=()=>res();
+  tx.onerror=()=>rej(tx.error||Error('Transakcija zamjene podataka nije uspjela.'));
+  tx.onabort=()=>rej(tx.error||Error('Transakcija zamjene podataka je prekinuta.'));
+ });
+}
