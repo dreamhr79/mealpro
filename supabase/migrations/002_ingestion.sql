@@ -31,6 +31,54 @@ begin
 end;
 $$;
 
+create or replace function public.apply_staged_catalog(p_sync_id bigint, p_observed_at timestamptz default now())
+returns table(products_count integer, offers_count integer, price_changes integer, removed_offers integer)
+language plpgsql
+security definer
+set search_path = public
+as $
+declare
+  v_products integer;
+  v_offers integer;
+  v_changes integer;
+  v_removed integer;
+begin
+  select count(*)::integer into v_products from public.catalog_products_stage;
+  select count(*)::integer into v_offers from public.catalog_offers_stage;
+  if v_products = 0 or v_offers = 0 then
+    raise exception 'Staged catalog is empty';
+  end if;
+
+  select count(*)::integer into v_removed
+  from public.offers o
+  where not exists (select 1 from public.catalog_offers_stage s where s.id = o.id);
+
+  select public.record_catalog_price_changes(p_observed_at) into v_changes;
+
+  delete from public.offers;
+  delete from public.products;
+
+  insert into public.products(id,barcode,name,brand,pack,unit,search_text,updated_at)
+  select id,barcode,name,brand,pack,unit,search_text,p_observed_at
+  from public.catalog_products_stage;
+
+  insert into public.offers(id,product_id,store,price,pack,unit,price_per_100,on_sale,observed_at)
+  select id,product_id,store,price,pack,unit,price_per_100,on_sale,p_observed_at
+  from public.catalog_offers_stage;
+
+  update public.catalog_syncs
+  set products_count=v_products, offers_count=v_offers, price_changes=v_changes,
+      removed_offers=v_removed, status='success', finished_at=p_observed_at
+  where id=p_sync_id;
+
+  truncate public.catalog_products_stage, public.catalog_offers_stage;
+
+  return query select v_products,v_offers,v_changes,v_removed;
+end;
+$;
+
 revoke all on public.catalog_products_stage from anon, authenticated;
 revoke all on public.catalog_offers_stage from anon, authenticated;
 revoke all on function public.record_catalog_price_changes(timestamptz) from public, anon, authenticated;
+
+revoke all on function public.apply_staged_catalog(bigint,timestamptz) from public, anon, authenticated;
