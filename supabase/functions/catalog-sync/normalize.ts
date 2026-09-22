@@ -73,3 +73,32 @@ export function normalizeRows(rows:CatalogRow[]){
   }
   return{products:[...products.values()],offers:[...offers.values()]};
 }
+
+
+export function createStreamingChainNormalizer(chain:string){
+  const best=new Map<string,{price:number;ppu:number|null;sale:boolean}>();
+  const rows:CatalogRow[]=[];
+  return {
+    acceptPrice(c:string[],i:number){
+      if(i===0)return;
+      const pid=(c[1]||"").trim(),regular=nval(c[2]),special=nval(c[6]);
+      const sale=!!special,price=sale?special:regular;
+      if(!pid||!price)return;
+      const prev=best.get(pid);
+      if(!prev||price<prev.price)best.set(pid,{price,ppu:nval(c[3]),sale});
+    },
+    acceptProduct(c:string[],i:number){
+      if(i===0)return;
+      const pid=(c[0]||"").trim(),name=(c[2]||"").trim(),bp=best.get(pid);
+      if(!pid||!name||!bp)return;
+      const pu=smartPack(c[6],c[5],name,bp.price,bp.ppu),code=barcode(c[1]);
+      rows.push({id:`${chain}:${pid}`,externalId:pid,barcode:code,name,brand:(c[3]||"").trim(),pack:pu.pack,unit:pu.unit,
+        price:bp.price,pricePer100:(pu.unit==="g"||pu.unit==="ml")&&pu.pack>0?bp.price/pu.pack*100:null,onSale:bp.sale,
+        store:CHAINS[chain]||chain,search:norm(`${name} ${c[3]||""} ${code}`)});
+    },
+    finish(){
+      best.clear();
+      return normalizeRows(rows);
+    }
+  };
+}
