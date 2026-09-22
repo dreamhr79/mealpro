@@ -24,4 +24,4 @@ jobs:
             -X POST "$CATALOG_SYNC_URL" \
             -H "Authorization: Bearer $CATALOG_SYNC_TOKEN" \
             -H "Content-Type: application/json" \
-            -d '{}'
+            -d '{"chains":["konzum","lidl","spar","plodine","tommy","kaufland"]}'
