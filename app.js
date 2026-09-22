@@ -818,6 +818,10 @@ document.addEventListener('click', async e => {
         recipe.updatedAt = new Date().toISOString();
         await dbPut('recipes', recipe);
         await trackRecipePrice(recipe);
+        if (meal.recipeId === recipe.id) {
+          meal.items = recipeLiveState(recipe).items.map(it => ({ productId: it.productId, product: { ...it.product }, qty: it.qty }));
+          renderMeal();
+        }
         renderRecipes();
         showToast(`Zamijenjeno s jeftinijim proizvodom: ${replacement.name}`);
       } catch (err) {
