@@ -1393,6 +1393,19 @@ function recipePriceTrend(recipeId, currentPrice) {
   return `<span class="recipeTrend ${cls}">${direction} ${eur(Math.abs(delta))} (${num(Math.abs(pct))}%)</span>`;
 }
 
+function recipePriceExplanation(recipeId) {
+  const history = recipePriceHistory.get(recipeId) || [];
+  if (history.length < 2) return '';
+  const previous = history[history.length - 2], current = history[history.length - 1];
+  const before = new Map((previous.ingredientPrices || []).map(x => [String(x.productId || x.name), x]));
+  const changes = (current.ingredientPrices || []).map(x => {
+    const old = before.get(String(x.productId || x.name));
+    return { name: x.name, delta: Number(x.cost) - Number(old?.cost || 0) };
+  }).filter(x => Math.abs(x.delta) >= 0.005).sort((a,b) => Math.abs(b.delta) - Math.abs(a.delta));
+  if (!changes.length) return '';
+  return `<details class="recipeWhy"><summary>Zašto se cijena promijenila?</summary><div>${changes.map(x => `<span>${esc(x.name)} <b>${x.delta > 0 ? '+' : '−'}${eur(Math.abs(x.delta))}</b></span>`).join('')}</div></details>`;
+}
+
 function recipePriceRange(recipeId, currentPrice) {
   const history = recipePriceHistory.get(recipeId) || [];
   const prices = [...history.map(x => Number(x.price) || 0), Number(currentPrice) || 0].filter(x => x > 0);
@@ -1458,6 +1471,7 @@ function renderRecipes() {
           <div class="name" style="font-size:16px">${esc(r.name)}</div>
           <div class="meta">${servings} porcija · ${items.length} sastojaka · <b>${eur(cost)}</b> (${eur(cost / servings)} / porciji)</div>
           <div class="recipePriceMeta">${recipePriceTrend(r.id, cost)} <span>${recipePriceRange(r.id, cost)}</span></div>
+          ${recipePriceExplanation(r.id)}
           <div class="macro" style="margin-top:2px">${calcMacroHtml}</div>
           ${authorMacroHtml}
         </div>
