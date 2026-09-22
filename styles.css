@@ -376,3 +376,5 @@ main {
 .recipeServingCustom{display:inline-flex;gap:4px;align-items:center}
 .recipeServingInput{width:58px;padding:7px 6px}
 @media(max-width:760px){.recipeServingCustom{width:100%}.recipeServingInput{flex:0 0 64px}.recipeServingCustom button{flex:1}}
+
+.recipeSource{display:inline-block;margin-left:5px;padding:1px 5px;border-radius:999px;background:#eef2f6;color:var(--muted);font-size:10px;font-weight:700}
