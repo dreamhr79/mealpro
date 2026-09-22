@@ -78,6 +78,7 @@ async function failSync(id: number | undefined, message: string) {
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", {status:405});
   let syncId: number | undefined;
+  const requestBody = await req.json().catch(() => ({}));
   try {
     const listRes = await fetch("https://api.cijene.dev/v0/list");
     if (!listRes.ok) throw new Error(`cijene.dev list failed: ${listRes.status}`);
@@ -94,8 +95,7 @@ Deno.serve(async (req) => {
     if (!buffer.byteLength) throw new Error("Downloaded archive is empty");
 
     const allowedChains = ["konzum","lidl","spar","plodine","tommy","eurospin","kaufland","studenac","ktc","metro","ribola","ntl"];
-    const body = await req.json().catch(() => ({}));
-    const requested = Array.isArray(body?.chains) ? body.chains.map((x:unknown) => String(x).toLowerCase()) : [];
+    const requested = Array.isArray(requestBody?.chains) ? body.chains.map((x:unknown) => String(x).toLowerCase()) : [];
     const chains = (requested.length ? requested : ["konzum","lidl","spar","plodine","tommy","kaufland"])
       .filter((x:string, i:number, a:string[]) => allowedChains.includes(x) && a.indexOf(x) === i);
     if (!chains.length) throw new Error("No supported chains selected");
