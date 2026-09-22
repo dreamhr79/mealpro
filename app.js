@@ -660,6 +660,8 @@ function addProductToMeal(product) {
 }
 
 function renderPicker() {
+  const pickerQuery = norm($('#creatorProductSearch')?.value || '');
+  const matchesPicker = p => !pickerQuery || norm(`${p.name || ''} ${p.brand || ''} ${p.store || ''} ${p.barcode || ''}`).includes(pickerQuery);
   const row = (p, source) => {
     const valBadge = formatUnitValue(p);
     return `
@@ -678,14 +680,14 @@ function renderPicker() {
   };
 
   // Sortiraj favorite po isplativosti po gramu/100g
-  const sortedFavs = [...favorites].sort((a, b) => {
+  const sortedFavs = favorites.filter(matchesPicker).sort((a, b) => {
     const va = getUnitValuePer100(a), vb = getUnitValuePer100(b);
     if (Number.isFinite(va) !== Number.isFinite(vb)) return Number.isFinite(va) ? -1 : 1;
     if (Number.isFinite(va) && va !== vb) return va - vb;
     return (Number(a.price) || 0) - (Number(b.price) || 0);
   });
 
-  const sortedCustom = [...custom].sort((a, b) => {
+  const sortedCustom = custom.filter(matchesPicker).sort((a, b) => {
     const va = getUnitValuePer100(a), vb = getUnitValuePer100(b);
     if (Number.isFinite(va) !== Number.isFinite(vb)) return Number.isFinite(va) ? -1 : 1;
     if (Number.isFinite(va) && va !== vb) return va - vb;
