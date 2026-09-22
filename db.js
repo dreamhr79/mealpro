@@ -1,4 +1,4 @@
-const DB_NAME='cijeneMealProDB',DB_VER=3;
+const DB_NAME='cijeneMealProDB',DB_VER=4;
 let _db;
 function openDB(){
  if(_db)return Promise.resolve(_db);
@@ -20,6 +20,10 @@ function openDB(){
    if(!d.objectStoreNames.contains('products')){
     const products=d.createObjectStore('products',{keyPath:'id'});
     products.createIndex('barcode','barcode',{unique:false});
+    products.createIndex('tokens','tokens',{multiEntry:true});
+   }else{
+    const products=r.transaction.objectStore('products');
+    if(!products.indexNames.contains('tokens'))products.createIndex('tokens','tokens',{multiEntry:true});
    }
    if(!d.objectStoreNames.contains('offers')){
     const offers=d.createObjectStore('offers',{keyPath:'id'});
@@ -95,6 +99,40 @@ async function dbSearchCatalog(q,limit=80){
   };
   req.onerror=()=>rej(req.error || Error('Greška pri pretraživanju kataloga.'));
  });
+}
+
+async function dbSearchProducts(q,limit=80){
+ const words=norm(q).split(/\s+/).filter(Boolean);
+ if(!words.length)return [];
+ const d=await openDB(),idx=d.transaction('products').objectStore('products').index('tokens');
+ const prefix=words[0],range=IDBKeyRange.bound(prefix,prefix+'\uffff'),rows=[];
+ return new Promise((res,rej)=>{
+  const req=idx.openCursor(range);
+  req.onsuccess=()=>{
+   const cur=req.result;
+   if(!cur||rows.length>=450){
+    const out=[];
+    for(const x of rows){
+     if(!words.every(w=>(x.search||'').includes(w)))continue;
+     out.push(x);
+     if(out.length>=limit)break;
+    }
+    res(out);return;
+   }
+   rows.push(cur.value);cur.continue();
+  };
+  req.onerror=()=>rej(req.error||Error('Greška pri pretraživanju proizvoda.'));
+ });
+}
+
+async function dbSearchProductsWithOffers(q,limit=80){
+ const products=await dbSearchProducts(q,limit);
+ const out=[];
+ for(const product of products){
+  const offers=await dbGetOffersByProductKey(product.id);
+  if(offers.length)out.push({product,offers});
+ }
+ return out;
 }
 
 async function dbGetOffersByBarcode(barcode){
