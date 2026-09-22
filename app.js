@@ -1338,20 +1338,32 @@ function onMacroInput(type) {
   g.fat = +$('#goalFat').value || 0;
   if (s.kcalLocked) balanceMacros(type);
   else { g.kcal = Math.round(g.protein * 4 + g.carbs * 4 + g.fat * 9); $('#goalKcal').value = g.kcal; }
-  saveDayPlan();
-  renderDayPlan();
+}
+
+function persistMacroGoals() {
+  saveDayPlan()
+    .then(() => renderDayPlan())
+    .catch(err => {
+      console.error('Day plan save error:', err);
+      showToast('Nije uspjelo spremanje ciljeva.');
+    });
 }
 
 $('#goalProtein').oninput = () => onMacroInput('protein');
 $('#goalCarbs').oninput = () => onMacroInput('carbs');
 $('#goalFat').oninput = () => onMacroInput('fat');
+$('#goalProtein').onchange = persistMacroGoals;
+$('#goalCarbs').onchange = persistMacroGoals;
+$('#goalFat').onchange = persistMacroGoals;
 $('#goalKcal').oninput = () => {
-  if (!dayPlan.settings.kcalLocked) return;
+  if (!dayPlan.settings.kcalLocked) {
+    dayPlan.goals.kcal = +$('#goalKcal').value || 0;
+    return;
+  }
   dayPlan.goals.kcal = +$('#goalKcal').value || 0;
   balanceMacros('');
-  saveDayPlan();
-  renderDayPlan();
 };
+$('#goalKcal').onchange = persistMacroGoals;
 $('#lockKcal').onclick = () => {
   dayPlan.settings.kcalLocked = !dayPlan.settings.kcalLocked;
   saveDayPlan();
