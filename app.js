@@ -627,15 +627,16 @@ document.getElementById('saveRecipeCopy')?.addEventListener('click', async () =>
 });
 
 $('#addMealToDayPlan').onclick = async () => {
-  if (!meal.items.length) return alert('Obrok nema sastojaka.');
+  const activeItems = compactMealItems();
+  if (!activeItems.length) return alert('Obrok nema sastojaka s količinom većom od 0.');
   const name = $('#mealName').value.trim() || 'Obrok';
-  const divisor = Math.max(1, meal.servings || 1);
-  const blockItems = meal.items.map(it => {
+  const divisor = Math.max(1, Number($('#mealServings').value || meal.servings || 1));
+  const blockItems = activeItems.map(it => {
     const p = resolveMealItemProduct(it);
     return {
       productId: p.id || it.productId || null,
       product: { ...p },
-      qty: (Number(it.qty) || 0) / divisor
+      qty: Number(it.qty) / divisor
     };
   });
   const block = { id: Date.now(), name, items: blockItems };
