@@ -1601,7 +1601,9 @@ function renderRecipes() {
           const unavailable = x.product.catalogAvailable === false ? '<span class="saleBadgeMini">nije u aktualnom katalogu</span>' : '';
           const alt = x.cheaperAlternative;
           const saving = alt ? itemCost(x.product, x.qty) - itemCost(alt.product, x.qty) : 0;
-          const alternative = alt && saving > 0.004 ? `<div class="recipeAlternative">Jeftinija alternativa: <b>${esc(alt.product.name)}</b> · ${alt.source} · ušteda ${eur(saving)} <button class="secondary recipeUseAlternative" data-recipe-id="${r.id}" data-product-id="${x.productId}" data-alt-source="${alt.source}" data-alt-id="${alt.product.id}">Zamijeni</button></div>` : '';
+          const recipeSavingPct = cost > 0 ? saving / cost * 100 : 0;
+          const newRecipeCost = Math.max(0, cost - saving);
+          const alternative = alt && saving > 0.004 ? `<div class="recipeAlternative"><span>Jeftinija alternativa: <b>${esc(alt.product.name)}</b> · ${alt.source}<br><small>Sastojak −${eur(saving)} · obrok ${eur(newRecipeCost)} (−${num(recipeSavingPct)}%)</small></span><button class="secondary recipeUseAlternative" data-recipe-id="${r.id}" data-product-id="${x.productId}" data-alt-source="${alt.source}" data-alt-id="${alt.product.id}">Zamijeni</button></div>` : '';
           return `<div class="recipeIngredientWrap"><div class="recipeIngredient"><span><b>${esc(x.product.name)}</b> <small class="recipeSource">${esc(x.priceSource || '')}</small> ${unavailable}</span><span>${num(x.qty, 0)} ${esc(x.product.unit || 'g')} · ${eur(itemCost(x.product, x.qty))}</span></div>${alternative}</div>`;
         }).join('')}
       </div>
