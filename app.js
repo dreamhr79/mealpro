@@ -1056,19 +1056,26 @@ $('#productForm').onsubmit = async e => {
 
 // === RECEPTI ===
 function renderRecipes() {
-  $('#recipesList').innerHTML = recipes.length ? recipes.sort((a, b) => b.savedAt.localeCompare(a.savedAt)).map(r => {
-    const cost = r.items.reduce((s, it) => s + itemCost(it.product, it.qty), 0);
+  const sortedRecipes = [...recipes].sort((a, b) => {
+    const da = String(a.savedAt || a.updatedAt || '');
+    const db = String(b.savedAt || b.updatedAt || '');
+    return db.localeCompare(da);
+  });
+  $('#recipesList').innerHTML = sortedRecipes.length ? sortedRecipes.map(r => {
+    const items = Array.isArray(r.items) ? r.items.map(it => ({ ...it, product: resolveMealItemProduct(it) })) : [];
+    const servings = Math.max(1, Number(r.servings) || 1);
+    const cost = items.reduce((s, it) => s + itemCost(it.product, Number(it.qty) || 0), 0);
     
     // Izračunaj makrose iz sastojaka
     let t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
-    for (const it of r.items) {
+    for (const it of items) {
       const p = it.product, q = it.qty, f = (p.unit === 'kom' ? q : q / 100);
       t.kcal += Number(p.kcal || 0) * f;
       t.protein += Number(p.protein || 0) * f;
       t.carbs += Number(p.carbs || 0) * f;
       t.fat += Number(p.fat || 0) * f;
     }
-    const sv = r.servings || 1;
+    const sv = servings;
     const calcMacroHtml = `${num(t.kcal / sv, 0)} kcal · P ${num(t.protein / sv)}g · UH ${num(t.carbs / sv)}g · M ${num(t.fat / sv)}g / porcija`;
 
     // Autorski makrosi ako postoje
@@ -1097,7 +1104,7 @@ function renderRecipes() {
       <div class="viewHead" style="margin-bottom:8px">
         <div>
           <div class="name" style="font-size:16px">${esc(r.name)}</div>
-          <div class="meta">${r.servings} porcija · ${r.items.length} sastojaka · <b>${eur(cost)}</b> (${eur(cost / r.servings)} / porciji)</div>
+          <div class="meta">${servings} porcija · ${items.length} sastojaka · <b>${eur(cost)}</b> (${eur(cost / servings)} / porciji)</div>
           <div class="macro" style="margin-top:2px">${calcMacroHtml}</div>
           ${authorMacroHtml}
         </div>
@@ -1107,7 +1114,7 @@ function renderRecipes() {
         </div>
       </div>
       <div class="recipeItems" style="font-size:12px;color:var(--muted)">
-        ${r.items.map(x => `${num(x.qty, 0)} ${esc(x.product.unit || 'g')} ${esc(x.product.name)}`).join(' · ')}
+        ${items.map(x => `${num(x.qty, 0)} ${esc(x.product.unit || 'g')} ${esc(x.product.name)}`).join(' · ')}
       </div>
       ${instructionsHtml}
     </div>`;
