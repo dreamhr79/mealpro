@@ -22,13 +22,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify runtime
+        run: |
+          set -euo pipefail
+          for f in app.html app.js db.js zip.js styles.css catalog-repository.js supabase-catalog-adapter.js config.js; do test -s "$f"; done
+          ! grep -R -n -E '<<<<<<<|=======|>>>>>>>' app.html app.js db.js styles.css
+          ! grep -n 'async async' app.js
       - uses: actions/configure-pages@v5
       - name: Prepare static site
         run: |
+          rm -rf _site
           mkdir _site
           cp app.html _site/index.html
           cp app.js db.js zip.js styles.css catalog-repository.js supabase-catalog-adapter.js config.js manifest.webmanifest sw.js _site/
           if [ -d icons ]; then cp -R icons _site/icons; fi
+          echo "$GITHUB_SHA" > _site/version.txt
+          touch _site/.nojekyll
+          for f in index.html app.js db.js zip.js styles.css catalog-repository.js supabase-catalog-adapter.js config.js version.txt; do test -s "_site/$f"; done
+          grep -q 'script src="app.js"' _site/index.html
+          grep -q 'script src="zip.js"' _site/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
