@@ -1039,10 +1039,19 @@ $('#lookupOffBtn').onclick = async () => {
 };
 
 async function propagateProductUpdate(updatedObj) {
+  const matches = it => {
+    if (!it) return false;
+    const p = it.product || {};
+    return String(p.id || '') === String(updatedObj.id || '') ||
+      String(it.productId || '') === String(updatedObj.id || '') ||
+      String(it.productId || '') === String(updatedObj.catalogId || '') ||
+      (updatedObj.barcode && String(p.barcode || it.barcode || '') === String(updatedObj.barcode));
+  };
   for (const r of recipes) {
     let changed = false;
     for (const it of r.items || []) {
-      if (it.product && (String(it.product.id) === String(updatedObj.id) || (updatedObj.barcode && String(it.product.barcode) === String(updatedObj.barcode)))) {
+      if (matches(it)) {
+        it.productId = updatedObj.id;
         it.product = { ...updatedObj };
         changed = true;
       }
@@ -1054,7 +1063,8 @@ async function propagateProductUpdate(updatedObj) {
   if (dayPlan && dayPlan.blocks) {
     for (const b of dayPlan.blocks) {
       for (const it of b.items || []) {
-        if (it.product && (String(it.product.id) === String(updatedObj.id) || (updatedObj.barcode && String(it.product.barcode) === String(updatedObj.barcode)))) {
+        if (matches(it)) {
+          it.productId = updatedObj.id;
           it.product = { ...updatedObj };
         }
       }
@@ -1062,7 +1072,8 @@ async function propagateProductUpdate(updatedObj) {
     await saveDayPlan();
   }
   for (const it of meal.items || []) {
-    if (it.product && (String(it.product.id) === String(updatedObj.id) || (updatedObj.barcode && String(it.product.barcode) === String(updatedObj.barcode)))) {
+    if (matches(it)) {
+      it.productId = updatedObj.id;
       it.product = { ...updatedObj };
     }
   }
