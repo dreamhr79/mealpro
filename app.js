@@ -803,6 +803,10 @@ document.addEventListener('click', async e => {
   }
   if (b.classList.contains('loadRecipe')) loadRecipe(b.dataset.id);
   if (b.classList.contains('recipeScale')) loadScaledRecipe(b.dataset.id, b.dataset.servings);
+  if (b.classList.contains('recipeScaleCustom')) {
+    const input = b.closest('.recipeServingCustom')?.querySelector('.recipeServingInput');
+    loadScaledRecipe(b.dataset.id, input?.value || 1);
+  }
 });
 
 document.addEventListener('input', e => {
@@ -1480,6 +1484,7 @@ function renderRecipes() {
           <button class="secondary recipeScale" data-id="${r.id}" data-servings="1">1 porcija</button>
           <button class="secondary recipeScale" data-id="${r.id}" data-servings="2">2 porcije</button>
           <button class="secondary recipeScale" data-id="${r.id}" data-servings="4">4 porcije</button>
+          <span class="recipeServingCustom"><input class="recipeServingInput" data-id="${r.id}" type="number" min="1" step="1" inputmode="numeric" value="${servings}" aria-label="Broj porcija"><button class="secondary recipeScaleCustom" data-id="${r.id}">Skaliraj</button></span>
           <button class="danger deleteRecipe" data-id="${r.id}">Obriši</button>
         </div>
       </div>
@@ -1497,6 +1502,24 @@ function renderRecipes() {
 $('#recipeSearch')?.addEventListener('input', renderRecipes);
 $('#recipeSort')?.addEventListener('change', renderRecipes);
 
+function servingLabel(n, accusative = false) {
+  const value = Math.max(1, Math.round(Number(n) || 1));
+  if (value === 1) return accusative ? 'porciju' : 'porcija';
+  if (value >= 2 && value <= 4) return 'porcije';
+  return 'porcija';
+}
+
+function recipeItemsForServings(recipe, targetServings = 1) {
+  const live = recipeLiveState(recipe);
+  const target = Math.max(1, Number(targetServings) || 1);
+  const factor = target / live.servings;
+  return live.items.map(it => ({
+    productId: it.product.id || it.productId || null,
+    product: { ...it.product },
+    qty: Number(it.qty) * factor
+  }));
+}
+
 function loadScaledRecipe(rid, targetServings) {
   const r = recipes.find(x => x.id === rid);
   if (!r) return;
@@ -1505,9 +1528,9 @@ function loadScaledRecipe(rid, targetServings) {
   const factor = target / live.servings;
   meal = {
     recipeId: null,
-    name: `${r.name} – ${target} ${target === 1 ? 'porcija' : 'porcije'}`,
+    name: `${r.name} – ${target} ${servingLabel(target)}`,
     servings: target,
-    items: live.items.map(it => ({ ...it, qty: Number(it.qty) * factor })),
+    items: recipeItemsForServings(r, target),
     instructions: r.instructions || '',
     authorMacros: r.authorMacros || null
   };
@@ -1516,7 +1539,7 @@ function loadScaledRecipe(rid, targetServings) {
   updateEditingBanner();
   activateTab('creator');
   renderMeal();
-  showToast(`Recept skaliran na ${target} ${target === 1 ? 'porciju' : 'porcije'}.`);
+  showToast(`Recept skaliran na ${target} ${servingLabel(target, true)}.`);
 }
 
 function loadRecipe(rid) {
