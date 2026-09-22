@@ -351,3 +351,14 @@ main {
   .mealIng>div:nth-child(3){display:none}
   .mealIng .macro{font-size:11px;line-height:1.35}
 }
+
+/* Phase 6: recipe details */
+.recipeItems{display:grid;gap:4px;margin-top:8px}
+.recipeIngredient{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid #edf1f5;font-size:12px;color:var(--muted)}
+.recipeIngredient:last-child{border-bottom:0}
+@media(max-width:760px){
+  .recipeActions{width:100%}
+  .recipeActions button{flex:1 1 auto}
+  .recipeIngredient{align-items:flex-start}
+  .recipeIngredient span:last-child{white-space:nowrap}
+}
