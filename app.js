@@ -1323,6 +1323,27 @@ $('#productForm').onsubmit = async e => {
 };
 
 // === RECEPTI ===
+function recipeLiveState(recipe) {
+  const items = (Array.isArray(recipe?.items) ? recipe.items : [])
+    .filter(it => Number(it?.qty) > 0)
+    .map(it => {
+      const product = resolveMealItemProduct(it);
+      return { ...it, productId: product.id || it.productId || null, product };
+    });
+  const servings = Math.max(1, Number(recipe?.servings) || 1);
+  let totals = { kcal: 0, protein: 0, carbs: 0, fat: 0, cost: 0 };
+  for (const it of items) {
+    const p = it.product, q = Number(it.qty) || 0;
+    const factor = p.unit === 'kom' ? q : q / 100;
+    totals.kcal += Number(p.kcal || 0) * factor;
+    totals.protein += Number(p.protein || 0) * factor;
+    totals.carbs += Number(p.carbs || 0) * factor;
+    totals.fat += Number(p.fat || 0) * factor;
+    totals.cost += itemCost(p, q);
+  }
+  return { items, servings, totals };
+}
+
 function renderRecipes() {
   const sortedRecipes = [...recipes].sort((a, b) => {
     const da = String(a.savedAt || a.updatedAt || '');
@@ -1330,21 +1351,9 @@ function renderRecipes() {
     return db.localeCompare(da);
   });
   $('#recipesList').innerHTML = sortedRecipes.length ? sortedRecipes.map(r => {
-    const items = Array.isArray(r.items) ? r.items.map(it => ({ ...it, product: resolveMealItemProduct(it) })) : [];
-    const servings = Math.max(1, Number(r.servings) || 1);
-    const cost = items.reduce((s, it) => s + itemCost(it.product, Number(it.qty) || 0), 0);
-    
-    // Izračunaj makrose iz sastojaka
-    let t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
-    for (const it of items) {
-      const p = it.product, q = it.qty, f = (p.unit === 'kom' ? q : q / 100);
-      t.kcal += Number(p.kcal || 0) * f;
-      t.protein += Number(p.protein || 0) * f;
-      t.carbs += Number(p.carbs || 0) * f;
-      t.fat += Number(p.fat || 0) * f;
-    }
-    const sv = servings;
-    const calcMacroHtml = `${num(t.kcal / sv, 0)} kcal · P ${num(t.protein / sv)}g · UH ${num(t.carbs / sv)}g · M ${num(t.fat / sv)}g / porcija`;
+    const { items, servings, totals } = recipeLiveState(r);
+    const cost = totals.cost;
+    const calcMacroHtml = `${num(totals.kcal / servings, 0)} kcal · P ${num(totals.protein / servings)}g · UH ${num(totals.carbs / servings)}g · M ${num(totals.fat / servings)}g / porcija`;
 
     // Autorski makrosi ako postoje
     let authorMacroHtml = '';
